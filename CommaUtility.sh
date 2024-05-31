@@ -1,15 +1,15 @@
 #!/bin/bash
 
-# Function to display the status section with borders and dash prefixes
-# Function to display the status section with enhanced checks
-display_status() {
+# Function to display SSH status
+display_ssh_status() {
     echo "+---------------------------------+"
-    echo "|            Status               |"
+    echo "|          SSH Status             |"
     echo "+---------------------------------+"
 
     # Define the expected owner and permissions
     expected_owner="comma"
     expected_permissions="-rw-------"
+    ssh_status=()
 
     # Check for SSH key in ~/.ssh/ and verify owner and permissions
     if [ -f /home/comma/.ssh/github ]; then
@@ -18,12 +18,14 @@ display_status() {
         actual_group=$(ls -l /home/comma/.ssh/github | awk '{ print $4 }')
 
         echo "- SSH key in ~/.ssh/: ✅"
+        ssh_status+=("exists")
 
         # Check permissions
         if [ "$actual_permissions" == "$expected_permissions" ]; then
             echo "- Permissions: ✅ ($actual_permissions)"
         else
             echo "- Permissions: ❌ (Expected: $expected_permissions, Actual: $actual_permissions)"
+            ssh_status+=("fix_permissions")
         fi
 
         # Check owner
@@ -31,9 +33,11 @@ display_status() {
             echo "- Owner: ✅ ($actual_owner:$actual_group)"
         else
             echo "- Owner: ❌ (Expected: $expected_owner:$expected_owner, Actual: $actual_owner:$actual_group)"
+            ssh_status+=("fix_owner")
         fi
     else
         echo "- SSH key in ~/.ssh/: ❌"
+        ssh_status+=("missing")
     fi
 
     # Similar checks for SSH key in /usr/default/home/comma/.ssh/
@@ -49,6 +53,7 @@ display_status() {
             echo "- Permissions: ✅ ($actual_permissions)"
         else
             echo "- Permissions: ❌ (Expected: $expected_permissions, Actual: $actual_permissions)"
+            ssh_status+=("fix_permissions_usr")
         fi
 
         # Check owner
@@ -56,10 +61,21 @@ display_status() {
             echo "- Owner: ✅ ($actual_owner:$actual_group)"
         else
             echo "- Owner: ❌ (Expected: $expected_owner:$expected_owner, Actual: $actual_owner:$actual_group)"
+            ssh_status+=("fix_owner_usr")
         fi
     else
         echo "- SSH key in /usr/default/home/comma/.ssh/: ❌"
+        ssh_status+=("missing_usr")
     fi
+
+    echo "+---------------------------------+"
+}
+
+# Function to display Git repo status
+display_git_status() {
+    echo "+---------------------------------+"
+    echo "|       Openpilot Repository      |"
+    echo "+---------------------------------+"
 
     # Check for /data/openpilot and display current branch and repo name
     if [ -d /data/openpilot ]; then
@@ -77,6 +93,34 @@ display_status() {
     echo "+---------------------------------+"
 }
 
+# Function to display available branches
+list_git_branches() {
+    echo "+---------------------------------+"
+    echo "|        Available Branches       |"
+    echo "+---------------------------------+"
+    if [ -d /data/openpilot ]; then
+        cd /data/openpilot
+        branches=$(git branch --all)
+        if [ -n "$branches" ]; then
+            echo "$branches"
+        else
+            echo "No branches found."
+        fi
+        cd - > /dev/null 2>&1
+    else
+        echo "Openpilot directory does not exist."
+    fi
+    echo "+---------------------------------+"
+}
+
+# Function to display general status
+display_general_status() {
+    echo "+---------------------------------+"
+    echo "|         General Status          |"
+    echo "+---------------------------------+"
+    # Add any general status checks here if needed
+    echo "+---------------------------------+"
+}
 
 # Function to create SSH config
 create_ssh_config() {
@@ -92,9 +136,6 @@ EOF
 # Function to generate SSH key with dynamic email input
 generate_ssh_key() {
     if [ ! -f /home/comma/.ssh/github ]; then
-        # read -p "Enter your email for the SSH key: " email
-        # echo "Generating SSH key..."
-        # ssh-keygen -t rsa -b 4096 -C "$email" -f /home/comma/.ssh/github -N ""
         ssh-keygen -t ed25519 -f /home/comma/.ssh/github
         echo "Displaying the SSH public key. Please add it to your GitHub account."
         cat /home/comma/.ssh/github.pub
@@ -102,6 +143,33 @@ generate_ssh_key() {
     else
         echo "SSH key already exists. Skipping SSH key generation..."
     fi
+}
+
+# Function to repair or create SSH setup
+repair_create_ssh() {
+    if [[ " ${ssh_status[@]} " =~ "missing" || " ${ssh_status[@]} " =~ "missing_usr" ]]; then
+        echo "Creating SSH setup..."
+        remove_ssh_contents
+        create_ssh_config
+        generate_ssh_key
+        test_ssh_connection
+    else
+        echo "Repairing SSH setup..."
+        [[ " ${ssh_status[@]} " =~ "fix_permissions" ]] && sudo chmod 600 /home/comma/.ssh/github
+        [[ " ${ssh_status[@]} " =~ "fix_owner" ]] && sudo chown comma:comma /home/comma/.ssh/github
+        [[ " ${ssh_status[@]} " =~ "fix_permissions_usr" ]] && sudo chmod 600 /usr/default/home/comma/.ssh/github
+        [[ " ${ssh_status[@]} " =~ "fix_owner_usr" ]] && sudo chown comma:comma /usr/default/home/comma/.ssh/github
+    fi
+    copy_ssh_config_and_keys
+}
+
+# Function to reset SSH setup
+reset_ssh() {
+    remove_ssh_contents
+    create_ssh_config
+    generate_ssh_key
+    copy_ssh_config_and_keys
+    test_ssh_connection
 }
 
 # Function to copy SSH config and keys
@@ -120,7 +188,12 @@ copy_ssh_config_and_keys() {
 # Function to test SSH connection
 test_ssh_connection() {
     echo "Testing SSH connection to GitHub..."
-    ssh -vT git@github.com
+    result=$(ssh -vT git@github.com 2>&1)
+    if echo "$result" | grep -q "You've successfully authenticated"; then
+        echo "SSH connection test successful: You are successfully authenticating with GitHub."
+    else
+        echo "SSH connection test failed."
+    fi
 }
 
 # Function to mount the / partition as read-write
@@ -129,7 +202,7 @@ mount_rw() {
     sudo mount -o remount,rw /
 }
 
-# function to remove the openpilot directory and clone the repository again
+# Function to remove the openpilot directory and clone the repository again
 reset_openpilot_repo() {
     echo "Removing the Openpilot repository..."
     cd /data
@@ -166,69 +239,74 @@ remove_ssh_contents() {
     sudo rm -rf /usr/default/home/comma/.ssh/*
 }
 
-# Function to reset and run all tasks
-reset_and_run_all() {
-    remove_ssh_contents
-    create_ssh_config
-    generate_ssh_key
-    copy_ssh_config_and_keys
-    test_ssh_connection
-    reset_openpilot_repo
-    clone_openpilot_repo
-}
-
-# Function to fix permissions and owner for /usr/default/home/comma/.ssh and its contents
-fix_ssh_permissions_and_owner() {
-    mount_rw
-    echo "Fixing permissions and owner for /usr/default/home/comma/.ssh and its contents..."
-    if [ -d /usr/default/home/comma/.ssh/ ]; then
-        sudo chown comma:comma /usr/default/home/comma/.ssh/ -R
-        sudo find /usr/default/home/comma/.ssh/ -type f -exec chmod 600 {} \;
-        sudo find /usr/default/home/comma/.ssh/ -type d -exec chmod 700 {} \;
-        echo "Permissions and owner fixed successfully."
-    else
-        echo "/usr/default/home/comma/.ssh/ directory does not exist."
-    fi
-}
-
+# Function to reboot the device
 reboot_device() {
     echo "Rebooting the device..."
     sudo reboot
 }
 
-# Main menu loop with the new menu item for fixing SSH permissions and owner
+# Function to shutdown the device
+shutdown_device() {
+    echo "Shutting down the device..."
+    sudo shutdown now
+}
+
+# Function to download the latest version of the script from GitHub
+update_script() {
+    echo "Downloading the latest version of the script..."
+    wget https://raw.githubusercontent.com/tonesto7/op-utilities/main/CommaUtility.sh -O CommaUtility.sh
+    chmod +x CommaUtility.sh
+
+    # Exit the script after updating and run the updated script
+    echo "Script updated successfully. Please run the updated script."
+    exit 0
+}
+
+# Main menu loop with the updated items and organized groups
 while true; do
     clear
-    display_status
-    echo "Menu:"
-    echo "1. Create SSH config"
-    echo "2. Generate SSH key"
-    echo "3. Copy SSH config and keys"
-    echo "4. Test SSH connection"
-    echo "5. Clone Openpilot repository"
-    echo "6. Remove Openpilot repository and Clone Again"
-    echo "7. View SSH key"
-    echo "8. Remove SSH folder contents"
-    echo "9. Reset and run all tasks"
-    echo "10. Fix SSH permissions and owner"
-    echo "11. Reboot device"
+    display_ssh_status
+    menu_item_1="Repair/Create SSH setup"
+    if [[ " ${ssh_status[@]} " =~ "missing" || " ${ssh_status[@]} " =~ "missing_usr" ]]; then
+        menu_item_1="Create SSH setup"
+    elif [[ " ${ssh_status[@]} " =~ "fix_permissions" || " ${ssh_status[@]} " =~ "fix_owner" || " ${ssh_status[@]} " =~ "fix_permissions_usr" || " ${ssh_status[@]} " =~ "fix_owner_usr" ]]; then
+        menu_item_1="Repair SSH setup"
+    fi
+    echo "1. $menu_item_1"
+    echo "2. Reset SSH setup"
+    echo "3. Test SSH connection"
+    echo "4. View SSH key"
+    echo ""
+    display_git_status
+    echo "5. Clone Openpilot Repository"
+    echo "6. Change Openpilot Repository"
+    echo "7. List available branches"
+    echo ""
+    # display_general_status
+    echo "General Tasks:"
+    echo "R. Reboot device"
+    echo "S. Shutdown device"
+    echo "U. Update script"
     echo "Q. Exit"
-    read -p "Enter your choice [1-10] or [Q] to Exit: " choice
+    read -p "Enter your choice [1-8] or [Q] to Exit: " choice
 
     case $choice in
-        1) create_ssh_config ;;
-        2) generate_ssh_key ;;
-        3) copy_ssh_config_and_keys ;;
-        4) test_ssh_connection ;;
+        1) repair_create_ssh ;;
+        2) reset_ssh ;;
+        3) test_ssh_connection ;;
+        4) view_ssh_key ;;
         5) clone_openpilot_repo ;;
         6) reset_openpilot_repo ;;
-        7) view_ssh_key ;;
-        8) remove_ssh_contents ;;
-        9) reset_and_run_all ;;
-        10) fix_ssh_permissions_and_owner ;;
-        11) reboot_device ;;
+        7) list_git_branches ;;
+        R) reboot_device ;;
+        r) reboot_device ;;
+        S) shutdown_device ;;
+        s) shutdown_device ;;
+        U) update_script ;;
+        u) update_script ;;
         Q) echo "Exiting..."; exit 0 ;;
-        *) echo "Invalid choice. Please enter a number between 1 and 10 or Q to Exit" ;;
+        q) echo "Exiting..."; exit 0 ;;
+        *) echo "Invalid choice. Please enter a number between 1 and 8 or Q to Exit" ;;
     esac
 
     read -p "Press enter to continue..."
