@@ -122,8 +122,7 @@ display_general_status() {
     echo "+---------------------------------+"
     echo "|           Other Items           |"
     echo "+---------------------------------+"
-    echo "- AGNOS: v$agnos_version          "
-    echo "- Build Time: $build_time         "
+    echo "- AGNOS: v$agnos_version ($build_time)"
     echo "+---------------------------------+"
 }
 
