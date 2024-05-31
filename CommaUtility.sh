@@ -116,9 +116,7 @@ list_git_branches() {
 # Function to display general status
 display_general_status() {
     echo "+---------------------------------+"
-    echo "|         General Status          |"
-    echo "+---------------------------------+"
-    # Add any general status checks here if needed
+    echo "|           Other Items           |"
     echo "+---------------------------------+"
 }
 
@@ -282,8 +280,8 @@ while true; do
     echo "6. Change Openpilot Repository"
     echo "7. List available branches"
     echo ""
-    # display_general_status
-    echo "General Tasks:"
+    display_general_status
+    # echo "General Tasks:"
     echo "R. Reboot device"
     echo "S. Shutdown device"
     echo "U. Update script"
