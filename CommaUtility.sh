@@ -111,12 +111,19 @@ list_git_branches() {
         echo "Openpilot directory does not exist."
     fi
     echo "+---------------------------------+"
+    read -p "Press enter to continue..."
 }
 
 # Function to display general status
 display_general_status() {
+    agnos_version=$(cat /VERSION)
+    build_time=$(awk 'NR==2' /BUILD)
+
     echo "+---------------------------------+"
     echo "|           Other Items           |"
+    echo "+---------------------------------+"
+    echo "- AGNOS: v$agnos_version          "
+    echo "- Build Time: $build_time         "
     echo "+---------------------------------+"
 }
 
@@ -159,6 +166,7 @@ repair_create_ssh() {
         [[ " ${ssh_status[@]} " =~ "fix_owner_usr" ]] && sudo chown comma:comma /usr/default/home/comma/.ssh/github
     fi
     copy_ssh_config_and_keys
+    read -p "Press enter to continue..."
 }
 
 # Function to reset SSH setup
@@ -168,6 +176,7 @@ reset_ssh() {
     generate_ssh_key
     copy_ssh_config_and_keys
     test_ssh_connection
+    read -p "Press enter to continue..."
 }
 
 # Function to copy SSH config and keys
@@ -192,6 +201,7 @@ test_ssh_connection() {
     else
         echo "SSH connection test failed."
     fi
+    read -p "Press enter to continue..."
 }
 
 # Function to mount the / partition as read-write
@@ -217,6 +227,7 @@ clone_openpilot_repo() {
     rm -rf ./openpilot
     git clone -b "$branch_name" --recurse-submodules git@github.com:"$github_repo" openpilot
     cd openpilot
+    read -p "Press enter to continue..."
 }
 
 # Function to view the SSH key
@@ -227,6 +238,7 @@ view_ssh_key() {
     else
         echo "SSH public key does not exist."
     fi
+    read -p "Press enter to continue..."
 }
 
 # Function to remove SSH folder contents
@@ -257,7 +269,42 @@ update_script() {
 
     # Exit the script after updating and run the updated script
     echo "Script updated successfully. Please run the updated script."
+    read -p "Press enter to continue..."
     exit 0
+}
+
+# Function to display logs
+display_logs() {
+    clear
+    echo "+---------------------------------+"
+    echo "|            Log Files            |"
+    echo "+---------------------------------+"
+    
+    log_files=(/data/log/*)
+    for i in "${!log_files[@]}"; do
+        echo "$((i+1)). ${log_files[$i]}"
+    done
+    echo "Q. Back to main menu"
+
+    read -p "Enter the number of the log file to view or [Q] to go back: " log_choice
+
+    if [[ $log_choice =~ ^[0-9]+$ ]] && (( log_choice > 0 && log_choice <= ${#log_files[@]} )); then
+        log_file="${log_files[$((log_choice-1))]}"
+        echo "Displaying contents of $log_file:"
+        cat "$log_file"
+    elif [[ $log_choice =~ ^[Qq]$ ]]; then
+        return
+    else
+        echo "Invalid choice. Please enter a valid number or Q to go back."
+    fi
+
+    read -p "Press enter to continue..."
+}
+
+# Function to get the AGNOS Version installed on the device
+get_agnos_version() {
+    agnos_version=$(cat /VERSION)
+    echo "AGNOS Version: $agnos_version"
 }
 
 # Main menu loop with the updated items and organized groups
@@ -281,7 +328,7 @@ while true; do
     echo "7. List available branches"
     echo ""
     display_general_status
-    # echo "General Tasks:"
+    echo "L. View logs"
     echo "R. Reboot device"
     echo "S. Shutdown device"
     echo "U. Update script"
@@ -296,6 +343,8 @@ while true; do
         5) clone_openpilot_repo ;;
         6) reset_openpilot_repo ;;
         7) list_git_branches ;;
+        L) display_logs ;;
+        l) display_logs ;;
         R) reboot_device ;;
         r) reboot_device ;;
         S) shutdown_device ;;
@@ -306,6 +355,4 @@ while true; do
         q) echo "Exiting..."; exit 0 ;;
         *) echo "Invalid choice. Please enter a number between 1 and 8 or Q to Exit" ;;
     esac
-
-    read -p "Press enter to continue..."
 done
