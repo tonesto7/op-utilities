@@ -138,6 +138,28 @@ Host github.com
 EOF
 }
 
+# Create a funtion to fetch and pull the latest changes from the repository
+fetch_pull_latest_changes() {
+    echo "Fetching and pulling the latest changes for the current branch..."
+    cd /data/openpilot
+    git fetch
+    git pull
+    cd /data
+    read -p "Press enter to continue..."
+}
+
+# funtion to change the branch of the repository
+change_branch() {
+    echo "Changing the branch of the repository..."
+    cd /data/openpilot
+    # prompt the user to enter the branch name
+    git fetch
+    read -p "Enter the branch name: " branch_name
+    git checkout "$branch_name"
+    cd /data
+    read -p "Press enter to continue..."
+}
+
 # Function to generate SSH key with dynamic email input
 generate_ssh_key() {
     if [ ! -f /home/comma/.ssh/github ]; then
@@ -323,9 +345,11 @@ while true; do
     echo "4. View SSH key"
     echo ""
     display_git_status
-    echo "5. Clone Openpilot Repository"
-    echo "6. Change Openpilot Repository"
-    echo "7. List available branches"
+    echo "5. Fetch and pull latest changes"
+    echo "6. Change branch"
+    echo "7. Clone Openpilot Repository"
+    echo "8. Change Openpilot Repository"
+    echo "9. List available branches"
     echo ""
     display_general_status
     echo "L. View logs"
@@ -340,9 +364,11 @@ while true; do
         2) reset_ssh ;;
         3) test_ssh_connection ;;
         4) view_ssh_key ;;
-        5) clone_openpilot_repo ;;
-        6) reset_openpilot_repo ;;
-        7) list_git_branches ;;
+        5) fetch_pull_latest_changes ;;
+        6) change_branch ;;
+        7) clone_openpilot_repo ;;
+        8) reset_openpilot_repo ;;
+        9) list_git_branches ;;
         L) display_logs ;;
         l) display_logs ;;
         R) reboot_device ;;
