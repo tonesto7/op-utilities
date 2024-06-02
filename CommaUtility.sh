@@ -243,7 +243,7 @@ reset_openpilot_repo() {
 clone_openpilot_repo() {
     read -p "Enter the branch name: " branch_name
     # prompt the user to enter the GitHub repository and pre-fill with the default repository
-    read -p "Enter the GitHub repository (e.g., ford-op/openpilot): " github_repo="ford-op/openpilot"
+    read -p "Enter the GitHub repository (e.g., ford-op/openpilot): " github_repo
     echo "Cloning the Openpilot repository..."
     cd /data
     rm -rf ./openpilot
