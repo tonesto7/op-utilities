@@ -10,7 +10,7 @@ BUILD_DIR=/data/media/openpilot-dev
 SOURCE_DIR="$(git rev-parse --show-toplevel)"
 
 FILES_SRC="release/files_tici"
-DEV_BRANCH="sp-dev-c3"
+DEV_BRANCH="sp-dev-prebuilt"
 
 BUILD_PANDA_DIR=/data/media/panda/openpilot-dev
 
@@ -110,7 +110,7 @@ version: sunnypilot v$SP_VERSION release
 date: $DATETIME
 master commit: $GIT_HASH
 "
-git branch -m dev-c3
+git branch -m $DEV_BRANCH
 
 # Run tests
 #TEST_FILES="tools/"
