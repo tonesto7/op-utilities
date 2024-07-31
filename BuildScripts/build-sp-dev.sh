@@ -10,7 +10,7 @@ BUILD_DIR=/data/media/openpilot-dev
 SOURCE_DIR="$(git rev-parse --show-toplevel)"
 
 FILES_SRC="release/files_tici"
-DEV_BRANCH="sp-dev-prebuilt"
+DEV_BRANCH="sp-master-ci"
 
 BUILD_PANDA_DIR=/data/media/panda/openpilot-dev
 
