@@ -85,7 +85,7 @@ display_git_status() {
         echo "- Openpilot directory: ✅"
         echo "- Current branch: $branch_name"
         echo "- Repository URL: $repo_url"
-        cd - > /dev/null 2>&1
+        cd - >/dev/null 2>&1
     else
         echo "- Openpilot directory: ❌"
     fi
@@ -106,7 +106,7 @@ list_git_branches() {
         else
             echo "No branches found."
         fi
-        cd - > /dev/null 2>&1
+        cd - >/dev/null 2>&1
     else
         echo "Openpilot directory does not exist."
     fi
@@ -130,10 +130,13 @@ display_general_status() {
 create_ssh_config() {
     mkdir -p /home/comma/.ssh
     echo "Creating SSH config file..."
-    cat > /home/comma/.ssh/config <<EOF
+    cat >/home/comma/.ssh/config <<EOF
 Host github.com
+  HostName github.com
+  User git
   AddKeysToAgent yes
   IdentityFile /home/comma/.ssh/github
+  IdentitiesOnly yes
 EOF
 }
 
@@ -301,17 +304,17 @@ display_logs() {
     echo "+---------------------------------+"
     echo "|            Log Files            |"
     echo "+---------------------------------+"
-    
+
     log_files=(/data/log/*)
     for i in "${!log_files[@]}"; do
-        echo "$((i+1)). ${log_files[$i]}"
+        echo "$((i + 1)). ${log_files[$i]}"
     done
     echo "Q. Back to main menu"
 
     read -p "Enter the number of the log file to view or [Q] to go back: " log_choice
 
-    if [[ $log_choice =~ ^[0-9]+$ ]] && (( log_choice > 0 && log_choice <= ${#log_files[@]} )); then
-        log_file="${log_files[$((log_choice-1))]}"
+    if [[ $log_choice =~ ^[0-9]+$ ]] && ((log_choice > 0 && log_choice <= ${#log_files[@]})); then
+        log_file="${log_files[$((log_choice - 1))]}"
         echo "Displaying contents of $log_file:"
         cat "$log_file"
     elif [[ $log_choice =~ ^[Qq]$ ]]; then
@@ -360,25 +363,31 @@ while true; do
     read -p "Enter your choice [1-8] or [Q] to Exit: " choice
 
     case $choice in
-        1) repair_create_ssh ;;
-        2) reset_ssh ;;
-        3) test_ssh_connection ;;
-        4) view_ssh_key ;;
-        5) fetch_pull_latest_changes ;;
-        6) change_branch ;;
-        7) clone_openpilot_repo ;;
-        8) reset_openpilot_repo ;;
-        9) list_git_branches ;;
-        L) display_logs ;;
-        l) display_logs ;;
-        R) reboot_device ;;
-        r) reboot_device ;;
-        S) shutdown_device ;;
-        s) shutdown_device ;;
-        U) update_script ;;
-        u) update_script ;;
-        Q) echo "Exiting..."; exit 0 ;;
-        q) echo "Exiting..."; exit 0 ;;
-        *) echo "Invalid choice. Please enter a number between 1 and 8 or Q to Exit" ;;
+    1) repair_create_ssh ;;
+    2) reset_ssh ;;
+    3) test_ssh_connection ;;
+    4) view_ssh_key ;;
+    5) fetch_pull_latest_changes ;;
+    6) change_branch ;;
+    7) clone_openpilot_repo ;;
+    8) reset_openpilot_repo ;;
+    9) list_git_branches ;;
+    L) display_logs ;;
+    l) display_logs ;;
+    R) reboot_device ;;
+    r) reboot_device ;;
+    S) shutdown_device ;;
+    s) shutdown_device ;;
+    U) update_script ;;
+    u) update_script ;;
+    Q)
+        echo "Exiting..."
+        exit 0
+        ;;
+    q)
+        echo "Exiting..."
+        exit 0
+        ;;
+    *) echo "Invalid choice. Please enter a number between 1 and 8 or Q to Exit" ;;
     esac
 done
