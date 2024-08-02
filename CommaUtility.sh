@@ -2,18 +2,14 @@
 
 # Function to display SSH status
 display_ssh_status() {
-    echo "+----------------------------------------------------+"
-    echo "|                     SSH Status                     |"
-    echo "+----------------------------------------------------+"
+    echo "+---------------------------------+"
+    echo "|          SSH Status             |"
+    echo "+---------------------------------+"
 
     # Define the expected owner and permissions
     expected_owner="comma"
     expected_permissions="-rw-------"
     ssh_status=()
-
-    # Initialize the output table
-    printf "| %-40s | %-2s |\n" "Item" "Status"
-    echo "+----------------------------------------------------+"
 
     # Check for SSH key in ~/.ssh/ and verify owner and permissions
     if [ -f /home/comma/.ssh/github ]; then
@@ -21,26 +17,26 @@ display_ssh_status() {
         actual_owner=$(ls -l /home/comma/.ssh/github | awk '{ print $3 }')
         actual_group=$(ls -l /home/comma/.ssh/github | awk '{ print $4 }')
 
-        printf "| %-40s | %-2s |\n" "SSH key in ~/.ssh/" "✅"
+        echo "- SSH key in ~/.ssh/: ✅"
         ssh_status+=("exists")
 
         # Check permissions
         if [ "$actual_permissions" == "$expected_permissions" ]; then
-            printf "| %-40s | %-2s |\n" "Permissions" "✅"
+            echo "- Permissions: ✅ ($actual_permissions)"
         else
-            printf "| %-40s | %-2s |\n" "Permissions (Expected: $expected_permissions, Actual: $actual_permissions)" "❌"
+            echo "- Permissions: ❌ (Expected: $expected_permissions, Actual: $actual_permissions)"
             ssh_status+=("fix_permissions")
         fi
 
         # Check owner
         if [ "$actual_owner" == "$expected_owner" ] && [ "$actual_group" == "$expected_owner" ]; then
-            printf "| %-40s | %-2s |\n" "Owner" "✅"
+            echo "- Owner: ✅ ($actual_owner:$actual_group)"
         else
-            printf "| %-40s | %-2s |\n" "Owner (Expected: $expected_owner:$expected_owner, Actual: $actual_owner:$actual_group)" "❌"
+            echo "- Owner: ❌ (Expected: $expected_owner:$expected_owner, Actual: $actual_owner:$actual_group)"
             ssh_status+=("fix_owner")
         fi
     else
-        printf "| %-40s | %-2s |\n" "SSH key in ~/.ssh/" "❌"
+        echo "- SSH key in ~/.ssh/: ❌"
         ssh_status+=("missing")
     fi
 
@@ -50,29 +46,29 @@ display_ssh_status() {
         actual_owner=$(ls -l /usr/default/home/comma/.ssh/github | awk '{ print $3 }')
         actual_group=$(ls -l /usr/default/home/comma/.ssh/github | awk '{ print $4 }')
 
-        printf "| %-50s | %-2s |\n" "SSH key in /usr/default/home/comma/.ssh/" "✅"
+        echo "- SSH key in /usr/default/home/comma/.ssh/: ✅"
 
         # Check permissions
         if [ "$actual_permissions" == "$expected_permissions" ]; then
-            printf "| %-50s | %-2s |\n" "Permissions" "✅"
+            echo "- Permissions: ✅ ($actual_permissions)"
         else
-            printf "| %-50s | %-2s |\n" "Permissions (Expected: $expected_permissions, Actual: $actual_permissions)" "❌"
+            echo "- Permissions: ❌ (Expected: $expected_permissions, Actual: $actual_permissions)"
             ssh_status+=("fix_permissions_usr")
         fi
 
         # Check owner
         if [ "$actual_owner" == "$expected_owner" ] && [ "$actual_group" == "$expected_owner" ]; then
-            printf "| %-50s | %-2s |\n" "Owner" "✅"
+            echo "- Owner: ✅ ($actual_owner:$actual_group)"
         else
-            printf "| %-50s | %-2s |\n" "Owner (Expected: $expected_owner:$expected_owner, Actual: $actual_owner:$actual_group)" "❌"
+            echo "- Owner: ❌ (Expected: $expected_owner:$expected_owner, Actual: $actual_owner:$actual_group)"
             ssh_status+=("fix_owner_usr")
         fi
     else
-        printf "| %-50s | %-2s |\n" "SSH key in /usr/default/home/comma/.ssh/" "❌"
+        echo "- SSH key in /usr/default/home/comma/.ssh/: ❌"
         ssh_status+=("missing_usr")
     fi
 
-    echo "+----------------------------------------------------+"
+    echo "+---------------------------------+"
 }
 
 # Function to display Git repo status
@@ -86,12 +82,12 @@ display_git_status() {
         cd /data/openpilot
         local branch_name=$(git rev-parse --abbrev-ref HEAD)
         local repo_url=$(git config --get remote.origin.url)
-        echo "- Openpilot directory: ${green}[OK]${reset}"
+        echo "- Openpilot directory: ✅"
         echo "- Current branch: $branch_name"
         echo "- Repository URL: $repo_url"
         cd - >/dev/null 2>&1
     else
-        echo "- Openpilot directory: ${red}[Fail]${reset}"
+        echo "- Openpilot directory: ❌"
     fi
 
     echo "+---------------------------------+"
@@ -136,8 +132,11 @@ create_ssh_config() {
     echo "Creating SSH config file..."
     cat >/home/comma/.ssh/config <<EOF
 Host github.com
+  HostName github.com
+  User git
   AddKeysToAgent yes
   IdentityFile /home/comma/.ssh/github
+  IdentitiesOnly yes
 EOF
 }
 
@@ -358,7 +357,7 @@ while true; do
         menu_item_1="Repair SSH setup"
     fi
     echo "1. $menu_item_1"
-    echo "2. Update SSH config"
+    echo "2. Copy SSH config and keys"
     echo "3. Reset SSH setup"
     echo "4. Test SSH connection"
     echo "5. View SSH key"
@@ -380,7 +379,7 @@ while true; do
 
     case $choice in
     1) repair_create_ssh ;;
-    2) create_and_copy_ssh_config ;;
+    3) copy_ssh_config_and_keys ;;
     3) reset_ssh ;;
     4) test_ssh_connection ;;
     5) view_ssh_key ;;
