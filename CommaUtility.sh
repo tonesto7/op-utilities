@@ -136,11 +136,8 @@ create_ssh_config() {
     echo "Creating SSH config file..."
     cat >/home/comma/.ssh/config <<EOF
 Host github.com
-  HostName github.com
-  User git
   AddKeysToAgent yes
   IdentityFile /home/comma/.ssh/github
-  IdentitiesOnly yes
 EOF
 }
 
