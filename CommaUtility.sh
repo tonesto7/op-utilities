@@ -132,15 +132,12 @@ create_ssh_config() {
     echo "Creating SSH config file..."
     cat >/home/comma/.ssh/config <<EOF
 Host github.com
-  HostName github.com
-  User git
   AddKeysToAgent yes
   IdentityFile /home/comma/.ssh/github
-  IdentitiesOnly yes
 EOF
 }
 
-# Create a funtion to fetch and pull the latest changes from the repository
+# Create a function to fetch and pull the latest changes from the repository
 fetch_pull_latest_changes() {
     echo "Fetching and pulling the latest changes for the current branch..."
     cd /data/openpilot
@@ -150,7 +147,7 @@ fetch_pull_latest_changes() {
     read -p "Press enter to continue..."
 }
 
-# funtion to change the branch of the repository
+# Function to change the branch of the repository
 change_branch() {
     echo "Changing the branch of the repository..."
     cd /data/openpilot
@@ -206,6 +203,7 @@ reset_ssh() {
 create_and_copy_ssh_config() {
     create_ssh_config
     copy_ssh_config_and_keys
+    read -p "Press enter to continue..."
 }
 
 # Function to copy SSH config and keys
@@ -375,11 +373,11 @@ while true; do
     echo "S. Shutdown device"
     echo "U. Update script"
     echo "Q. Exit"
-    read -p "Enter your choice [1-8] or [Q] to Exit: " choice
+    read -p "Enter your choice [1-10] or [Q] to Exit: " choice
 
     case $choice in
     1) repair_create_ssh ;;
-    3) copy_ssh_config_and_keys ;;
+    2) copy_ssh_config_and_keys ;;
     3) reset_ssh ;;
     4) test_ssh_connection ;;
     5) view_ssh_key ;;
@@ -404,6 +402,6 @@ while true; do
         echo "Exiting..."
         exit 0
         ;;
-    *) echo "Invalid choice. Please enter a number between 1 and 8 or Q to Exit" ;;
+    *) echo "Invalid choice. Please enter a number between 1 and 10 or Q to Exit" ;;
     esac
 done
