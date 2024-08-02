@@ -82,12 +82,12 @@ display_git_status() {
         cd /data/openpilot
         local branch_name=$(git rev-parse --abbrev-ref HEAD)
         local repo_url=$(git config --get remote.origin.url)
-        echo "- Openpilot directory: ✅"
+        echo "- Openpilot directory: ${green}[OK]${reset}"
         echo "- Current branch: $branch_name"
         echo "- Repository URL: $repo_url"
         cd - >/dev/null 2>&1
     else
-        echo "- Openpilot directory: ❌"
+        echo "- Openpilot directory: ${red}[Fail]${reset}"
     fi
 
     echo "+---------------------------------+"
@@ -239,18 +239,27 @@ reset_openpilot_repo() {
     echo "Removing the Openpilot repository..."
     cd /data
     rm -rf openpilot
-    clone_openpilot_repo
+    clone_openpilot_repo "true"
 }
 
 # Function to clone Openpilot repository
 clone_openpilot_repo() {
+    local shallow="${1:-true}"
     read -p "Enter the branch name: " branch_name
     # prompt the user to enter the GitHub repository and pre-fill with the default repository
     read -p "Enter the GitHub repository (e.g., ford-op/openpilot): " github_repo
-    echo "Cloning the Openpilot repository..."
+    if [ "$shallow" = true ]; then
+        echo "Cloning the Openpilot repository (Shallow)..."
+    else
+        echo "Cloning the Openpilot repository (Full)..."
+    fi
     cd /data
     rm -rf ./openpilot
-    git clone -b "$branch_name" --recurse-submodules git@github.com:"$github_repo" openpilot
+    if [ "$shallow" = true ]; then
+        git clone -b "$branch_name" --depth 1 --recurse-submodules git@github.com:"$github_repo" openpilot
+    else
+        git clone -b "$branch_name" --recurse-submodules git@github.com:"$github_repo" openpilot
+    fi
     cd openpilot
     read -p "Press enter to continue..."
 }
@@ -369,7 +378,7 @@ while true; do
     4) view_ssh_key ;;
     5) fetch_pull_latest_changes ;;
     6) change_branch ;;
-    7) clone_openpilot_repo ;;
+    7) clone_openpilot_repo "true" ;;
     8) reset_openpilot_repo ;;
     9) list_git_branches ;;
     L) display_logs ;;
