@@ -72,16 +72,6 @@ else
   BUILD_DIR="/data/openpilot"
   # Get the directory where the script is located
   SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
-
-  # Check if the script is already running from /data
-  if [ "$SCRIPT_DIR" != "/data" ]; then
-    # Copy this script to /data directory
-    cp "$0" "/data" -f
-    cd "/data"
-
-    # Run the script with the same arguments
-    exec bash "/data/$(basename "$0")" --$BUILD_TYPE "$@"
-  fi
 fi
 
 TMP_DIR="${BUILD_DIR}-build-tmp"
