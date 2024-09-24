@@ -417,10 +417,13 @@ master commit: $GIT_HASH
         echo "[-] Local branch $BUILD_BRANCH does not exist. Skipping deletion."
     fi
 
-    # Check if the remote build branch exists and delete it
+    # Check if the remote build branch exists before attempting to delete
     if git ls-remote --heads "$ORIGIN_REPO" "$BUILD_BRANCH" | grep "$BUILD_BRANCH" >/dev/null 2>&1; then
         echo "[-] Deleting Remote branch: $BUILD_BRANCH T=$SECONDS"
-        git push "$ORIGIN_REPO" --delete "$BUILD_BRANCH" || { echo "[-] Failed to delete remote branch $BUILD_BRANCH"; }
+        git push "$ORIGIN_REPO" --delete "$BUILD_BRANCH" || {
+            echo "[-] Failed to delete remote branch $BUILD_BRANCH"
+            exit 1
+        }
     else
         echo "[-] Remote branch $BUILD_BRANCH does not exist. Skipping deletion."
     fi
