@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 
 set -e
+set -o pipefail # Ensures that the script catches errors in piped commands
 
 # Parse command line arguments
 BUILD_TYPE=""
+CLONE_ACTION=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -13,6 +15,18 @@ while [[ $# -gt 0 ]]; do
         ;;
     --public)
         BUILD_TYPE="public"
+        shift
+        ;;
+    --clone-public-bp)
+        BUILD_TYPE="clone-public-bp"
+        shift
+        ;;
+    --clone-internal-dev-build)
+        BUILD_TYPE="clone-internal-dev-build"
+        shift
+        ;;
+    --clone-internal-dev)
+        BUILD_TYPE="clone-internal-dev"
         shift
         ;;
     *)
@@ -29,9 +43,12 @@ show_menu() {
         echo "BluePilot Build Menu"
         echo "********************"
         echo ""
-        echo "Select build type:"
-        echo "1) Internal Dev"
-        echo "2) Public Experimental"
+        echo "Select menu item:"
+        echo "1) Build BP Internal Dev"
+        echo "2) Build BP Public Experimental"
+        echo "3) Clone BP staging-DONOTUSE Repo on Comma"
+        echo "4) Clone bp-internal-dev-build on Comma"
+        echo "5) Clone bp-internal-dev on Comma"
         echo "r) Reboot Device"
         echo "q) Quit"
         read -p "Enter your choice: " choice
@@ -42,6 +59,18 @@ show_menu() {
             ;;
         2)
             BUILD_TYPE="public"
+            return 0
+            ;;
+        3)
+            BUILD_TYPE="clone-public-bp"
+            return 0
+            ;;
+        4)
+            BUILD_TYPE="clone-internal-dev-build"
+            return 0
+            ;;
+        5)
+            BUILD_TYPE="clone-internal-dev"
             return 0
             ;;
         R | r)
@@ -79,7 +108,7 @@ TMP_DIR="${BUILD_DIR}-build-tmp"
 # Function to set up git identity and SSH command
 setup_git_env() {
     if [ -f "$BUILD_DIR/release/identity_ford_op.sh" ]; then
-        source $BUILD_DIR/release/identity_ford_op.sh
+        source "$BUILD_DIR/release/identity_ford_op.sh"
     else
         echo "[-] identity_ford_op.sh not found"
         exit 1
@@ -98,14 +127,14 @@ setup_git_env() {
 # Function to remove the $BUILD_DIR
 clear_build_dir() {
     echo "[-] Removing existing BUILD_DIR"
-    rm -rf $BUILD_DIR
+    rm -rf "$BUILD_DIR"
 }
 
 # Function to build OpenPilot
 build_openpilot() {
     export PYTHONPATH="$BUILD_DIR"
     echo "[-] Building Openpilot"
-    scons -j$(nproc)
+    scons -j"$(nproc)"
 }
 
 create_prebuilt_marker() {
@@ -116,14 +145,14 @@ create_prebuilt_marker() {
 # Function to handle the panda directory
 handle_panda_directory() {
     echo "Creating panda_tmp directory"
-    mkdir -p $BUILD_DIR/panda_tmp/board/obj
-    mkdir -p $BUILD_DIR/panda_tmp/python
+    mkdir -p "$BUILD_DIR/panda_tmp/board/obj"
+    mkdir -p "$BUILD_DIR/panda_tmp/python"
 
     # Copy the required files
-    cp -f $BUILD_DIR/panda/board/obj/panda.bin.signed $BUILD_DIR/panda_tmp/board/obj/panda.bin.signed || echo "File not found: panda.bin.signed"
-    cp -f $BUILD_DIR/panda/board/obj/panda_h7.bin.signed $BUILD_DIR/panda_tmp/board/obj/panda_h7.bin.signed || echo "File not found: panda_h7.bin.signed"
-    cp -f $BUILD_DIR/panda/board/obj/bootstub.panda.bin $BUILD_DIR/panda_tmp/board/obj/bootstub.panda.bin || echo "File not found: bootstub.panda.bin"
-    cp -f $BUILD_DIR/panda/board/obj/bootstub.panda_h7.bin $BUILD_DIR/panda_tmp/board/obj/bootstub.panda_h7.bin || echo "File not found: bootstub.panda_h7.bin"
+    cp -f "$BUILD_DIR/panda/board/obj/panda.bin.signed" "$BUILD_DIR/panda_tmp/board/obj/panda.bin.signed" || echo "File not found: panda.bin.signed"
+    cp -f "$BUILD_DIR/panda/board/obj/panda_h7.bin.signed" "$BUILD_DIR/panda_tmp/board/obj/panda_h7.bin.signed" || echo "File not found: panda_h7.bin.signed"
+    cp -f "$BUILD_DIR/panda/board/obj/bootstub.panda.bin" "$BUILD_DIR/panda_tmp/board/obj/bootstub.panda.bin" || echo "File not found: bootstub.panda.bin"
+    cp -f "$BUILD_DIR/panda/board/obj/bootstub.panda_h7.bin" "$BUILD_DIR/panda_tmp/board/obj/bootstub.panda_h7.bin" || echo "File not found: bootstub.panda_h7.bin"
 
     # Patch the __init__.py file
     if [ "$OS" = "Darwin" ]; then
@@ -133,19 +162,19 @@ handle_panda_directory() {
     fi
 
     # Move the panda/python directory to panda_tmp/python
-    cp -r $BUILD_DIR/panda/python/. $BUILD_DIR/panda_tmp/python || echo "Directory not found: panda/python"
-    cp -f $BUILD_DIR/panda/.gitignore $BUILD_DIR/panda_tmp/.gitignore || echo "File not found: .gitignore"
-    cp -f $BUILD_DIR/panda/__init__.py $BUILD_DIR/panda_tmp/__init__.py || echo "File not found: __init__.py"
-    cp -f $BUILD_DIR/panda/mypy.ini $BUILD_DIR/panda_tmp/mypy.ini || echo "File not found: mypi.ini"
-    cp -f $BUILD_DIR/panda/panda.png $BUILD_DIR/panda_tmp/panda.png || echo "File not found: panda.png"
-    cp -f $BUILD_DIR/panda/pyproject.toml $BUILD_DIR/panda_tmp/pyproject.toml || echo "File not found: pyproject.toml"
-    cp -f $BUILD_DIR/panda/requirements.txt $BUILD_DIR/panda_tmp/requirements.txt || echo "File not found: requirements.txt"
-    cp -f $BUILD_DIR/panda/setup.cfg $BUILD_DIR/panda_tmp/setup.cfg || echo "File not found: setup.cfg"
-    cp -f $BUILD_DIR/panda/setup.py $BUILD_DIR/panda_tmp/setup.py || echo "File not found: setup.py"
+    cp -r "$BUILD_DIR/panda/python/." "$BUILD_DIR/panda_tmp/python" || echo "Directory not found: panda/python"
+    cp -f "$BUILD_DIR/panda/.gitignore" "$BUILD_DIR/panda_tmp/.gitignore" || echo "File not found: .gitignore"
+    cp -f "$BUILD_DIR/panda/__init__.py" "$BUILD_DIR/panda_tmp/__init__.py" || echo "File not found: __init__.py"
+    cp -f "$BUILD_DIR/panda/mypy.ini" "$BUILD_DIR/panda_tmp/mypy.ini" || echo "File not found: mypi.ini"
+    cp -f "$BUILD_DIR/panda/panda.png" "$BUILD_DIR/panda_tmp/panda.png" || echo "File not found: panda.png"
+    cp -f "$BUILD_DIR/panda/pyproject.toml" "$BUILD_DIR/panda_tmp/pyproject.toml" || echo "File not found: pyproject.toml"
+    cp -f "$BUILD_DIR/panda/requirements.txt" "$BUILD_DIR/panda_tmp/requirements.txt" || echo "File not found: requirements.txt"
+    cp -f "$BUILD_DIR/panda/setup.cfg" "$BUILD_DIR/panda_tmp/setup.cfg" || echo "File not found: setup.cfg"
+    cp -f "$BUILD_DIR/panda/setup.py" "$BUILD_DIR/panda_tmp/setup.py" || echo "File not found: setup.py"
 
     # Remove the panda directory and move the panda_tmp directory to panda
-    rm -rf $BUILD_DIR/panda
-    mv $BUILD_DIR/panda_tmp $BUILD_DIR/panda
+    rm -rf "$BUILD_DIR/panda"
+    mv "$BUILD_DIR/panda_tmp" "$BUILD_DIR/panda"
 }
 
 # Function to process submodules
@@ -271,7 +300,7 @@ cleanup_directory() {
     local dir=$1
     local patterns=$2
     for pattern in $patterns; do
-        find $dir/ -name "$pattern" -exec rm -rf {} +
+        find "$dir/" -name "$pattern" -exec rm -rf {} +
     done
 }
 
@@ -287,6 +316,40 @@ cleanup_tinygrad_repo() {
     rm -f tinygrad_repo/{.flake8,.pylintrc,.tokeignore,*.sh,*.ini,*.toml,*.py}
 }
 
+# Function to handle cloning the public BluePilot on Comma
+clone_public_bluepilot() {
+    echo "[-] Cloning the public BluePilot on Comma..."
+    cd /data
+    rm -rf openpilot
+    git clone git@github.com:BluePilotDev/bluepilot.git -b staging-DONOTUSE openpilot
+    cd openpilot
+    sudo reboot
+}
+
+# Function to handle cloning bp-internal-dev-build on Comma
+clone_internal_dev_build() {
+    echo "[-] Cloning bp-internal-dev-build on Comma..."
+    cd /data
+    rm -rf openpilot
+    git clone --recurse-submodules --depth 1 git@github.com:ford-op/sp-dev-c3.git -b bp-internal-dev-build openpilot
+    cd openpilot
+    scons -j"$(nproc)"
+    sudo reboot
+}
+
+# Function to handle cloning bp-internal-dev on Comma
+clone_internal_dev() {
+    echo "[-] Cloning bp-internal-dev on Comma..."
+    cd /data
+    rm -rf openpilot
+    git clone --recurse-submodules --depth 1 git@github.com:ford-op/sp-dev-c3.git -b bp-internal-dev openpilot
+    cd openpilot
+    scons -j"$(nproc)"
+    sudo reboot
+}
+
+# Function to process submodules (existing function retained)
+
 # Function for public experimental build process
 public_build_process() {
     local CLONE_BRANCH="bp-public-experimental"
@@ -299,33 +362,33 @@ public_build_process() {
 
     # Clear build directory
     echo "[-] Removing existing BUILD_DIR"
-    rm -rf $BUILD_DIR
-    rm -rf $TMP_DIR
+    rm -rf "$BUILD_DIR"
+    rm -rf "$TMP_DIR"
 
     echo "[-] Cloning $BUILD_BRANCH branch into $BUILD_DIR"
-    git clone --single-branch --branch $BUILD_BRANCH $GIT_PUBLIC_REPO_ORIGIN $BUILD_DIR
+    git clone --single-branch --branch "$BUILD_BRANCH" "$GIT_PUBLIC_REpo_ORIGIN" "$BUILD_DIR"
 
-    cd $BUILD_DIR
+    cd "$BUILD_DIR"
 
     echo "[-] Removing all files from cloned repo except .git"
     find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
 
     # Clone main repo
     echo "[-] Cloning $GIT_REPO_ORIGIN Repo to $TMP_DIR"
-    git clone --recurse-submodules --depth 1 $GIT_REPO_ORIGIN -b $CLONE_BRANCH $TMP_DIR
+    git clone --recurse-submodules --depth 1 "$GIT_REPO_ORIGIN" -b "$CLONE_BRANCH" "$TMP_DIR"
 
     # Change to the TMP_DIR
-    cd $TMP_DIR
+    cd "$TMP_DIR"
 
-    process_submodules $TMP_DIR
+    process_submodules "$TMP_DIR"
 
-    cd $BUILD_DIR
+    cd "$BUILD_DIR"
 
     echo "[-] Copying files from TMP_DIR to BUILD_DIR"
-    rsync -a --exclude='.git' $TMP_DIR/ $BUILD_DIR/
+    rsync -a --exclude='.git' "$TMP_DIR/" "$BUILD_DIR/"
 
     # Remove the TMP_DIR
-    rm -rf $TMP_DIR
+    rm -rf "$TMP_DIR"
 
     setup_git_env
     build_openpilot
@@ -350,20 +413,20 @@ internal_dev_build_process() {
     echo "[-] Starting internal dev build process"
 
     echo "[-] Cleaning Build Directories"
-    rm -rf $BUILD_DIR
-    rm -rf $TMP_DIR
+    rm -rf "$BUILD_DIR"
+    rm -rf "$TMP_DIR"
 
     # Clone repo
-    git clone --recurse-submodules $GIT_REPO_ORIGIN -b $CLONE_BRANCH $BUILD_DIR
-    cd $BUILD_DIR
+    git clone --recurse-submodules "$GIT_REPO_ORIGIN" -b "$CLONE_BRANCH" "$BUILD_DIR"
+    cd "$BUILD_DIR"
 
-    # define git identity and ssh variables
+    # Define git identity and ssh variables
     setup_git_env
 
     # Build and process
     build_openpilot
     handle_panda_directory
-    process_submodules $BUILD_DIR
+    process_submodules "$BUILD_DIR"
     create_opendbc_gitignore
     update_main_gitignore
     cleanup_files
@@ -449,16 +512,29 @@ main() {
             show_menu
         fi
 
-        if [ "$BUILD_TYPE" = "public" ]; then
+        case "$BUILD_TYPE" in
+        public)
             public_build_process
-        elif [ "$BUILD_TYPE" = "dev" ]; then
+            ;;
+        dev)
             internal_dev_build_process
-        else
+            ;;
+        clone-public-bp)
+            clone_public_bluepilot
+            ;;
+        clone-internal-dev-build)
+            clone_internal_dev_build
+            ;;
+        clone-internal-dev)
+            clone_internal_dev
+            ;;
+        *)
             echo "Invalid build type. Exiting."
             exit 1
-        fi
+            ;;
+        esac
 
-        echo "[-] Build completed successfully T=$SECONDS"
+        echo "[-] Action completed successfully T=$SECONDS"
 
         # Reset BUILD_TYPE to show menu again
         BUILD_TYPE=""
