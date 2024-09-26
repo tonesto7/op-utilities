@@ -7,6 +7,33 @@ SCRIPT_MODIFIED="2021-09-25"
 set -e
 set -o pipefail # Ensures that the script catches errors in piped commands
 
+reset_variables() {
+    SCRIPT_ACTION=""
+    REPO=""
+    CLONE_BRANCH=""
+    BUILD_BRANCH=""
+}
+
+# Function to set environment variables
+set_env_vars() {
+    # Common variables
+    OS=$(uname)
+    GIT_BP_PUBLIC_REPO="git@github.com:BluePilotDev/bluepilot.git"
+    GIT_BP_PRIVATE_REPO="git@github.com:ford-op/sp-dev-c3.git"
+
+    # Determine the build directory based on the OS
+    if [ "$OS" = "Darwin" ]; then
+        BUILD_DIR="$HOME/Documents/bluepilot-utility/bp-build"
+    else
+        BUILD_DIR="/data/openpilot"
+        # Get the directory where the script is located
+        SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+    fi
+
+    # Define the temporary directory for the build
+    TMP_DIR="${BUILD_DIR}-build-tmp"
+}
+
 # Function to display help
 show_help() {
     cat <<EOL
@@ -58,39 +85,36 @@ fi
 eval set -- "$TEMP"
 
 # Initialize variables
-BUILD_TYPE=""
-REPO=""
-CLONE_BRANCH=""
-BUILD_BRANCH=""
+reset_variables
 
 while true; do
     case "$1" in
     --dev)
-        BUILD_TYPE="build-dev"
+        SCRIPT_ACTION="build-dev"
         shift
         ;;
     --public)
-        BUILD_TYPE="build-public"
+        SCRIPT_ACTION="build-public"
         shift
         ;;
     --clone-public-bp)
-        BUILD_TYPE="clone-public-bp"
+        SCRIPT_ACTION="clone-public-bp"
         shift
         ;;
     --clone-internal-dev-build)
-        BUILD_TYPE="clone-internal-dev-build"
+        SCRIPT_ACTION="clone-internal-dev-build"
         shift
         ;;
     --clone-internal-dev)
-        BUILD_TYPE="clone-internal-dev"
+        SCRIPT_ACTION="clone-internal-dev"
         shift
         ;;
     --custom-build)
-        BUILD_TYPE="custom-build"
+        SCRIPT_ACTION="custom-build"
         shift
         ;;
     --custom-clone)
-        BUILD_TYPE="custom-clone"
+        SCRIPT_ACTION="custom-clone"
         shift
         ;;
     --repo)
@@ -120,27 +144,20 @@ while true; do
     esac
 done
 
-# Validate parameters based on BUILD_TYPE
-if [[ "$BUILD_TYPE" == "custom-build" ]]; then
+# Validate parameters based on SCRIPT_ACTION
+if [[ "$SCRIPT_ACTION" == "custom-build" ]]; then
     if [[ -z "$REPO" || -z "$CLONE_BRANCH" || -z "$BUILD_BRANCH" ]]; then
         echo "Error: --custom-build requires --repo, --clone-branch, and --build-branch parameters."
         show_help
         exit 1
     fi
-elif [[ "$BUILD_TYPE" == "custom-clone" ]]; then
+elif [[ "$SCRIPT_ACTION" == "custom-clone" ]]; then
     if [[ -z "$REPO" || -z "$CLONE_BRANCH" ]]; then
         echo "Error: --custom-clone requires --repo and --clone-branch parameters."
         show_help
         exit 1
     fi
 fi
-
-reset_variables() {
-    BUILD_TYPE=""
-    REPO=""
-    CLONE_BRANCH=""
-    BUILD_BRANCH=""
-}
 
 # Function to show menu and get build type
 show_menu() {
@@ -173,39 +190,39 @@ show_menu() {
         read -p "Enter your choice: " choice
         case $choice in
         1)
-            BUILD_TYPE="build-dev"
+            SCRIPT_ACTION="build-dev"
             clear
             return 0
             ;;
         2)
-            BUILD_TYPE="build-public"
+            SCRIPT_ACTION="build-public"
             clear
             return 0
             ;;
         3)
-            BUILD_TYPE="custom-build"
+            SCRIPT_ACTION="custom-build"
             select_custom_build_repo
             clear
             return 0
             ;;
         4)
-            BUILD_TYPE="clone-public-bp"
+            SCRIPT_ACTION="clone-public-bp"
             clear
             return 0
             ;;
         5)
-            BUILD_TYPE="clone-internal-dev-build"
+            SCRIPT_ACTION="clone-internal-dev-build"
             clear
             return 0
             ;;
         6)
-            BUILD_TYPE="clone-internal-dev"
+            SCRIPT_ACTION="clone-internal-dev"
             clear
             return 0
             ;;
         7)
             clear
-            BUILD_TYPE="custom-clone"
+            SCRIPT_ACTION="custom-clone"
             return 0
             ;;
         R | r)
@@ -222,24 +239,6 @@ show_menu() {
             ;;
         esac
     done
-}
-
-# Function to set environment variables
-set_env_vars() {
-    # Common variables
-    OS=$(uname)
-
-    # Determine the build directory based on the OS
-    if [ "$OS" = "Darwin" ]; then
-        BUILD_DIR="$HOME/Documents/git-test/bp-${BUILD_TYPE}-build"
-    else
-        BUILD_DIR="/data/openpilot"
-        # Get the directory where the script is located
-        SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
-    fi
-
-    # Define the temporary directory for the build
-    TMP_DIR="${BUILD_DIR}-build-tmp"
 }
 
 # Function to set up git identity and SSH command
@@ -490,17 +489,17 @@ clone_repo() {
 }
 
 clone_public_bluepilot() {
-    clone_repo "the public BluePilot" "git@github.com:BluePilotDev/bluepilot.git" "staging-DONOTUSE" "no"
+    clone_repo "the public BluePilot" "$GIT_BP_PUBLIC_REPO" "staging-DONOTUSE" "no"
 }
 
 # Modify clone_internal_dev_build to use clone_repo with build
 clone_internal_dev_build() {
-    clone_repo "bp-internal-dev-build" "git@github.com:ford-op/sp-dev-c3.git" "bp-internal-dev-build" "no"
+    clone_repo "bp-internal-dev-build" "$GIT_BP_PRIVATE_REPO" "bp-internal-dev-build" "no"
 }
 
 # Modify clone_internal_dev to use clone_repo with build
 clone_internal_dev() {
-    clone_repo "bp-internal-dev" "git@github.com:ford-op/sp-dev-c3.git" "bp-internal-dev" "yes"
+    clone_repo "bp-internal-dev" "$GIT_BP_PRIVATE_REPO" "bp-internal-dev" "yes"
 }
 
 reboot_device() {
@@ -526,11 +525,11 @@ choose_repository_and_branch() {
         case $repo_choice in
         1)
             REPO="bluepilotdev"
-            GIT_REPO_ORIGIN="git@github.com:BluePilotDev/bluepilot.git"
+            GIT_REPO_ORIGIN="$GIT_BP_PUBLIC_REPO"
             ;;
         2)
             REPO="sp-dev-c3"
-            GIT_REPO_ORIGIN="git@github.com:ford-op/sp-dev-c3.git"
+            GIT_REPO_ORIGIN="$GIT_BP_PRIVATE_REPO"
             ;;
         C | c)
             echo "Returning to main menu."
@@ -552,7 +551,7 @@ choose_repository_and_branch() {
     if [ $? -ne 0 ]; then
         echo "[-] Failed to fetch branches from $GIT_REPO_ORIGIN."
         echo "Error: $REMOTE_BRANCHES"
-        BUILD_TYPE=""
+        SCRIPT_ACTION=""
         return
     fi
 
@@ -567,7 +566,7 @@ choose_repository_and_branch() {
 
     if [ ${#BRANCH_ARRAY[@]} -eq 0 ]; then
         echo "[-] No branches found in the repository."
-        BUILD_TYPE=""
+        SCRIPT_ACTION=""
         return
     fi
 
@@ -580,9 +579,8 @@ choose_repository_and_branch() {
         read -p "Select a branch by number (or 'c' to cancel): " branch_choice
         if [[ "$branch_choice" == "c" || "$branch_choice" == "C" ]]; then
             echo "Returning to main menu."
-            BUILD_TYPE=""
             clear
-            choose_repository_and_branch "$action"
+            show_menu true
             return
         elif [[ "$branch_choice" =~ ^[0-9]+$ ]] && [ "$branch_choice" -ge 1 ] && [ "$branch_choice" -le "${#BRANCH_ARRAY[@]}" ]; then
             SELECTED_BRANCH="${BRANCH_ARRAY[$((branch_choice - 1))]}"
@@ -616,10 +614,10 @@ clone_custom_repo() {
     # Determine the correct repository URL based on the selected repository
     case "$REPO" in
     bluepilotdev)
-        GIT_REPO_URL="git@github.com:BluePilotDev/bluepilot.git"
+        GIT_REPO_URL="$GIT_BP_PUBLIC_REPO"
         ;;
     sp-dev-c3)
-        GIT_REPO_URL="git@github.com:ford-op/sp-dev-c3.git"
+        GIT_REPO_URL="$GIT_BP_PRIVATE_REPO"
         ;;
     *)
         echo "[-] Unknown repository: $REPO"
@@ -820,17 +818,17 @@ master commit: $GIT_HASH
 # Main execution flow
 main() {
     while true; do
-        if [ -z "$BUILD_TYPE" ]; then
+        if [ -z "$SCRIPT_ACTION" ]; then
             show_menu
             continue
         fi
 
-        case "$BUILD_TYPE" in
+        case "$SCRIPT_ACTION" in
         build-public)
-            build_cross_repo_branch "bp-public-experimental" "staging-DONOTUSE" "bluepilot experimental" "git@github.com:ford-op/sp-dev-c3.git" "git@github.com:BluePilotDev/bluepilot.git"
+            build_cross_repo_branch "bp-public-experimental" "staging-DONOTUSE" "bluepilot experimental" "$GIT_BP_PUBLIC_REPO" "$GIT_BP_PUBLIC_REPO"
             ;;
         build-dev)
-            build_repo_branch "bp-internal-dev" "bp-internal-dev-build" "bluepilot internal dev" "git@github.com:ford-op/sp-dev-c3.git"
+            build_repo_branch "bp-internal-dev" "bp-internal-dev-build" "bluepilot internal dev" "$GIT_BP_PRIVATE_REPO"
             ;;
         clone-public-bp)
             clone_public_bluepilot
@@ -862,8 +860,8 @@ main() {
     done
 }
 
-# Show menu if BUILD_TYPE is not set via command line
-if [ -z "$BUILD_TYPE" ]; then
+# Show menu if SCRIPT_ACTION is not set via command line
+if [ -z "$SCRIPT_ACTION" ]; then
     show_menu
 fi
 
