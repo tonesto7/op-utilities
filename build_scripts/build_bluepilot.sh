@@ -137,6 +137,10 @@ while true; do
         show_help
         exit 0
         ;;
+    --update)
+        update_script
+        exit 0
+        ;;
     --)
         shift
         break

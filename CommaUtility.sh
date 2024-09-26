@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Script Version
+SCRIPT_VERSION="1.1.0"
+SCRIPT_MODIFIED="2021-09-26"
+
 # Function to display SSH status
 display_ssh_status() {
     echo "+---------------------------------+"
@@ -304,10 +308,21 @@ update_script() {
     wget https://raw.githubusercontent.com/tonesto7/op-utilities/main/CommaUtility.sh -O CommaUtility.sh
     chmod +x CommaUtility.sh
 
-    # Exit the script after updating and run the updated script
-    echo "Script updated successfully. Please run the updated script."
+    echo "Script updated successfully. Restarting the updated script."
     read -p "Press enter to continue..."
-    exit 0
+    exec /data/CommaUtility.sh
+    return
+}
+
+download_bp_utility() {
+    echo "Downloading the latest version of the bluepilot utility script..."
+    wget https://raw.githubusercontent.com/tonesto7/op-utilities/main/build_scripts/build_bluepilot.sh -O build_bluepilot.sh
+    chmod +x build_bluepilot.sh
+
+    # Exit the script after updating and run the updated script
+    echo "Script updated the bp utility script successfully. Please run the updated script."
+    read -p "Press enter to continue..."
+    return
 }
 
 # Function to display logs
@@ -347,6 +362,15 @@ get_agnos_version() {
 # Main menu loop with the updated items and organized groups
 while true; do
     clear
+
+    # Display the Script version and last modified date
+    echo "+---------------------------------+"
+    echo "|      CommaUtility Script        |"
+    echo "+---------------------------------+"
+    echo "Version: $SCRIPT_VERSION"
+    echo "Last Modified: $SCRIPT_MODIFIED"
+    echo ""
+
     display_ssh_status
     menu_item_1="Repair/Create SSH setup"
     if [[ " ${ssh_status[@]} " =~ "missing" || " ${ssh_status[@]} " =~ "missing_usr" ]]; then
@@ -371,6 +395,7 @@ while true; do
     echo "L. View logs"
     echo "R. Reboot device"
     echo "S. Shutdown device"
+    echo "BP. Download BluePilot Utility"
     echo "U. Update script"
     echo "Q. Exit"
     read -p "Enter your choice [1-10] or [Q] to Exit: " choice
@@ -386,22 +411,15 @@ while true; do
     8) clone_openpilot_repo "true" ;;
     9) reset_openpilot_repo ;;
     10) list_git_branches ;;
-    L) display_logs ;;
-    l) display_logs ;;
-    R) reboot_device ;;
-    r) reboot_device ;;
-    S) shutdown_device ;;
-    s) shutdown_device ;;
-    U) update_script ;;
-    u) update_script ;;
-    Q)
+    l | L) display_logs ;;
+    r | R) reboot_device ;;
+    s | S) shutdown_device ;;
+    u | U) update_script ;;
+    q | Q)
         echo "Exiting..."
         exit 0
         ;;
-    q)
-        echo "Exiting..."
-        exit 0
-        ;;
+    bp | BP) download_bp_utility ;;
     *) echo "Invalid choice. Please enter a number between 1 and 10 or Q to Exit" ;;
     esac
 done
