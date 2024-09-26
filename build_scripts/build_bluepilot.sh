@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 # Script Version
-SCRIPT_VERSION="1.2.0"
-SCRIPT_MODIFIED="2021-09-25"
+SCRIPT_VERSION="1.3.0"
+SCRIPT_MODIFIED="2021-09-26"
 
 set -e
 set -o pipefail # Ensures that the script catches errors in piped commands
@@ -57,6 +57,7 @@ Options:
     --repo <repository_name>        Select repository (bluepilotdev or sp-dev-c3)
     --clone-branch <branch_name>    Branch to clone from the selected repository
   -h, --help                        Show this help message and exit
+  --update                          Update the script to the latest version
 
 Examples:
   # Standard build options
@@ -68,6 +69,9 @@ Examples:
 
   # Custom clone via command line
   ./build_script.sh --custom-clone --repo sp-dev-c3 --clone-branch experimental-branch
+
+  # Update the script to the latest version
+  ./build_script.sh --update
 
   # Display help
   ./build_script.sh --help
@@ -185,6 +189,7 @@ show_menu() {
         echo "6) Clone bp-internal-dev on Comma"
         echo "7) Clone a Branch from repo"
         echo "r) Reboot Device"
+        echo "u) Update this Script"
         echo "h) Show Help"
         echo "q) Quit"
         read -p "Enter your choice: " choice
@@ -234,6 +239,7 @@ show_menu() {
         Q | q)
             exit 0
             ;;
+        u | U) update_script ;;
         *)
             echo "Invalid choice. Please try again."
             ;;
@@ -276,6 +282,16 @@ build_openpilot() {
 create_prebuilt_marker() {
     # Mark as prebuilt release
     touch prebuilt
+}
+
+update_script() {
+    echo "Downloading the latest version of the bluepilot utility script..."
+    wget https://raw.githubusercontent.com/tonesto7/op-utilities/main/build_scripts/build_bluepilot.sh -O build_bluepilot.sh
+    chmod +x build_bluepilot.sh
+
+    # Exit the script after updating and run the updated script
+    echo "Script updated successfully. Reloading the new version."
+    exec /data/build_bluepilot.sh
 }
 
 # Function to handle the panda directory
