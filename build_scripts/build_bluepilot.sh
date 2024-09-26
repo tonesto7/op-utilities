@@ -15,24 +15,24 @@ reset_variables() {
 }
 
 # Function to set environment variables
-set_env_vars() {
-    # Common variables
-    OS=$(uname)
-    GIT_BP_PUBLIC_REPO="git@github.com:BluePilotDev/bluepilot.git"
-    GIT_BP_PRIVATE_REPO="git@github.com:ford-op/sp-dev-c3.git"
+# set_env_vars() {
+# Common variables
+OS=$(uname)
+GIT_BP_PUBLIC_REPO="git@github.com:BluePilotDev/bluepilot.git"
+GIT_BP_PRIVATE_REPO="git@github.com:ford-op/sp-dev-c3.git"
 
-    # Determine the build directory based on the OS
-    if [ "$OS" = "Darwin" ]; then
-        BUILD_DIR="$HOME/Documents/bluepilot-utility/bp-build"
-    else
-        BUILD_DIR="/data/openpilot"
-        # Get the directory where the script is located
-        SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
-    fi
+# Determine the build directory based on the OS
+if [ "$OS" = "Darwin" ]; then
+    BUILD_DIR="$HOME/Documents/bluepilot-utility/bp-build"
+else
+    BUILD_DIR="/data/openpilot"
+    # Get the directory where the script is located
+    SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+fi
 
-    # Define the temporary directory for the build
-    TMP_DIR="${BUILD_DIR}-build-tmp"
-}
+# Define the temporary directory for the build
+TMP_DIR="${BUILD_DIR}-build-tmp"
+# }
 
 # Function to display help
 show_help() {
@@ -747,9 +747,16 @@ custom_build_process() {
         exit 1
     fi
 
-    #   echo "[-] Starting custom build process for repository '$REPO' with clone branch '$CLONE_BRANCH' and build branch '$BUILD_BRANCH'"
+    # Ensure REPO is set
+    if [ "$REPO" = "bluepilotdev" ]; then
+        GIT_REPO_ORIGIN="$GIT_BP_PUBLIC_REPO"
+    elif [ "$REPO" = "sp-dev-c3" ]; then
+        GIT_REPO_ORIGIN="$GIT_BP_PRIVATE_REPO"
+    else
+        echo "Invalid repository selected"
+        exit 1
+    fi
 
-    local GIT_REPO_ORIGIN="$REPO"
     local COMMIT_DESC_HEADER="Custom Build"
 
     build_repo_branch "$CLONE_BRANCH" "$BUILD_BRANCH" "$COMMIT_DESC_HEADER" "$GIT_REPO_ORIGIN"
@@ -884,9 +891,6 @@ main() {
 if [ -z "$SCRIPT_ACTION" ]; then
     show_menu
 fi
-
-# Set environment variables
-set_env_vars
 
 # Run the main function
 main
