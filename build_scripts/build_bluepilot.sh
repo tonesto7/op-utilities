@@ -1,80 +1,176 @@
 #!/usr/bin/env bash
 
+# Script Version
+SCRIPT_VERSION="1.2.0"
+SCRIPT_MODIFIED="2021-09-25"
+
 set -e
 set -o pipefail # Ensures that the script catches errors in piped commands
 
-# Parse command line arguments
-BUILD_TYPE=""
-CLONE_ACTION=""
+# Function to display help
+show_help() {
+  cat <<EOL
+BluePilot Build Script (V$SCRIPT_VERSION) - Last Modified: $SCRIPT_MODIFIED
+------------------------------------------------------------
 
-while [[ $# -gt 0 ]]; do
-  case $1 in
-  --dev)
-    BUILD_TYPE="dev"
-    shift
-    ;;
-  --public)
-    BUILD_TYPE="public"
-    shift
-    ;;
-  --clone-public-bp)
-    BUILD_TYPE="clone-public-bp"
-    shift
-    ;;
-  --clone-internal-dev-build)
-    BUILD_TYPE="clone-internal-dev-build"
-    shift
-    ;;
-  --clone-internal-dev)
-    BUILD_TYPE="clone-internal-dev"
-    shift
-    ;;
-  *)
-    echo "Unknown option: $1"
-    exit 1
-    ;;
+Usage:
+  ./build_script.sh [OPTIONS]
+
+Options:
+  --dev                             Build BP Internal Dev
+  --public                          Build BP Public Experimental
+  --clone-public-bp                 Clone BP staging-DONOTUSE Repo on Comma
+  --clone-internal-dev-build        Clone bp-internal-dev-build on Comma
+  --clone-internal-dev              Clone bp-internal-dev on Comma
+  --custom-build                    Perform a custom build
+    --repo <repository_name>        Select repository (bluepilotdev or sp-dev-c3)
+    --clone-branch <branch_name>    Branch to clone from the selected repository
+    --build-branch <branch_name>    Branch name for the build
+  --custom-clone                    Perform a custom clone
+    --repo <repository_name>        Select repository (bluepilotdev or sp-dev-c3)
+    --clone-branch <branch_name>    Branch to clone from the selected repository
+  -h, --help                        Show this help message and exit
+
+Examples:
+  # Standard build options
+  ./build_script.sh --dev
+  ./build_script.sh --public
+
+  # Custom build via command line
+  ./build_script.sh --custom-build --repo bluepilotdev --clone-branch feature-branch --build-branch build-feature
+
+  # Custom clone via command line
+  ./build_script.sh --custom-clone --repo sp-dev-c3 --clone-branch experimental-branch
+
+  # Display help
+  ./build_script.sh --help
+EOL
+}
+
+# Parse command line arguments using getopt
+TEMP=$(getopt -o h --long dev,public,clone-public-bp,clone-internal-dev-build,clone-internal-dev,custom-build,custom-clone,repo:,clone-branch:,build-branch:,help -n 'build_script.sh' -- "$@")
+if [ $? != 0 ]; then
+  echo "Terminating..." >&2
+  exit 1
+fi
+
+# Note the quotes around `$TEMP`: they are essential!
+eval set -- "$TEMP"
+
+# Initialize variables
+BUILD_TYPE=""
+REPO=""
+CLONE_BRANCH=""
+BUILD_BRANCH=""
+
+while true; do
+  case "$1" in
+    --dev)
+      BUILD_TYPE="dev"; shift ;;
+    --public)
+      BUILD_TYPE="public"; shift ;;
+    --clone-public-bp)
+      BUILD_TYPE="clone-public-bp"; shift ;;
+    --clone-internal-dev-build)
+      BUILD_TYPE="clone-internal-dev-build"; shift ;;
+    --clone-internal-dev)
+      BUILD_TYPE="clone-internal-dev"; shift ;;
+    --custom-build)
+      BUILD_TYPE="custom-build"; shift ;;
+    --custom-clone)
+      BUILD_TYPE="custom-clone"; shift ;;
+    --repo)
+      REPO="$2"; shift 2 ;;
+    --clone-branch)
+      CLONE_BRANCH="$2"; shift 2 ;;
+    --build-branch)
+      BUILD_BRANCH="$2"; shift 2 ;;
+    -h|--help)
+      show_help; exit 0 ;;
+    --)
+      shift; break ;;
+    *)
+      echo "Internal error!"; exit 1 ;;
   esac
 done
+
+# Validate parameters based on BUILD_TYPE
+if [[ "$BUILD_TYPE" == "custom-build" ]]; then
+  if [[ -z "$REPO" || -z "$CLONE_BRANCH" || -z "$BUILD_BRANCH" ]]; then
+    echo "Error: --custom-build requires --repo, --clone-branch, and --build-branch parameters."
+    show_help
+    exit 1
+  fi
+elif [[ "$BUILD_TYPE" == "custom-clone" ]]; then
+  if [[ -z "$REPO" || -z "$CLONE_BRANCH" ]]; then
+    echo "Error: --custom-clone requires --repo and --clone-branch parameters."
+    show_help
+    exit 1
+  fi
+fi
 
 # Function to show menu and get build type
 show_menu() {
   while true; do
-    echo "********************"
-    echo "BluePilot Build Menu"
-    echo "********************"
+    clear
+    echo "************************************************************"
+    echo "BluePilot Build Menu (V$SCRIPT_VERSION) - Last Modified: $SCRIPT_MODIFIED"
+    echo "************************************************************"
     echo ""
     echo "Select menu item:"
     echo "1) Build BP Internal Dev"
     echo "2) Build BP Public Experimental"
-    echo "3) Clone BP staging-DONOTUSE Repo on Comma"
-    echo "4) Clone bp-internal-dev-build on Comma"
-    echo "5) Clone bp-internal-dev on Comma"
+    echo "3) Custom Build (Select Repository and Branch)"
+    echo "4) Clone BP staging-DONOTUSE Repo on Comma"
+    echo "5) Clone bp-internal-dev-build on Comma"
+    echo "6) Clone bp-internal-dev on Comma"
+    echo "7) Custom Clone (Select Repository and Branch)"
     echo "r) Reboot Device"
+    echo "h) Show Help"
     echo "q) Quit"
     read -p "Enter your choice: " choice
     case $choice in
     1)
       BUILD_TYPE="dev"
+      clear
       return 0
       ;;
     2)
       BUILD_TYPE="public"
+      clear
       return 0
       ;;
     3)
-      BUILD_TYPE="clone-public-bp"
+      BUILD_TYPE="custom-build"
+      select_repository
+      clear
       return 0
       ;;
     4)
-      BUILD_TYPE="clone-internal-dev-build"
+      BUILD_TYPE="clone-public-bp"
+      clear
       return 0
       ;;
     5)
+      BUILD_TYPE="clone-internal-dev-build"
+      clear
+      return 0
+      ;;
+    6)
       BUILD_TYPE="clone-internal-dev"
+      clear
+      return 0
+      ;;
+    7)
+      clear
+      BUILD_TYPE="custom-clone"
       return 0
       ;;
     R | r)
       sudo reboot
+      ;;
+    H | h | help)
+      show_help
       ;;
     Q | q)
       exit 0
@@ -86,24 +182,24 @@ show_menu() {
   done
 }
 
-# Show menu if BUILD_TYPE is not set
-if [ -z "$BUILD_TYPE" ]; then
-  show_menu
-fi
 
-# Common variables
-OS=$(uname)
+# Function to set environment variables
+set_env_vars() {
+  # Common variables
+  OS=$(uname)
 
-# Determine the build directory based on the OS
-if [ "$OS" = "Darwin" ]; then
-  BUILD_DIR="~/Documents/git-test/bp-${BUILD_TYPE}-build"
-else
-  BUILD_DIR="/data/openpilot"
-  # Get the directory where the script is located
-  SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
-fi
+  # Determine the build directory based on the OS
+  if [ "$OS" = "Darwin" ]; then
+    BUILD_DIR="$HOME/Documents/git-test/bp-${BUILD_TYPE}-build"
+  else
+    BUILD_DIR="/data/openpilot"
+   # Get the directory where the script is located
+   SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+  fi
 
-TMP_DIR="${BUILD_DIR}-build-tmp"
+  # Define the temporary directory for the build   
+  TMP_DIR="${BUILD_DIR}-build-tmp"
+}
 
 # Function to set up git identity and SSH command
 setup_git_env() {
@@ -165,7 +261,7 @@ handle_panda_directory() {
   cp -r "$BUILD_DIR/panda/python/." "$BUILD_DIR/panda_tmp/python" || echo "Directory not found: panda/python"
   cp -f "$BUILD_DIR/panda/.gitignore" "$BUILD_DIR/panda_tmp/.gitignore" || echo "File not found: .gitignore"
   cp -f "$BUILD_DIR/panda/__init__.py" "$BUILD_DIR/panda_tmp/__init__.py" || echo "File not found: __init__.py"
-  cp -f "$BUILD_DIR/panda/mypy.ini" "$BUILD_DIR/panda_tmp/mypy.ini" || echo "File not found: mypi.ini"
+  cp -f "$BUILD_DIR/panda/mypy.ini" "$BUILD_DIR/panda_tmp/mypy.ini" || echo "File not found: mypy.ini"
   cp -f "$BUILD_DIR/panda/panda.png" "$BUILD_DIR/panda_tmp/panda.png" || echo "File not found: panda.png"
   cp -f "$BUILD_DIR/panda/pyproject.toml" "$BUILD_DIR/panda_tmp/pyproject.toml" || echo "File not found: pyproject.toml"
   cp -f "$BUILD_DIR/panda/requirements.txt" "$BUILD_DIR/panda_tmp/requirements.txt" || echo "File not found: requirements.txt"
@@ -319,53 +415,258 @@ cleanup_tinygrad_repo() {
 # Function to handle cloning the public BluePilot on Comma
 clone_public_bluepilot() {
   echo "[-] Cloning the public BluePilot on Comma..."
-  cd /data
-  rm -rf openpilot
-  git clone git@github.com:BluePilotDev/bluepilot.git -b staging-DONOTUSE openpilot
-  cd openpilot
-  sudo reboot
+  d /data || { echo "[-] Failed to change directory to /data"; exit 1; }
+  rm -rf openpilot || { echo "[-] Failed to remove existing openpilot directory"; exit 1; }
+  git clone git@github.com:BluePilotDev/bluepilot.git -b staging-DONOTUSE openpilot || {
+    echo "[-] Failed to clone BluePilotDev/bluepilot repository."
+    exit 1
+  }
+  cd openpilot || { echo "[-] Failed to change directory to openpilot"; exit 1; }
+  reboot_device
 }
 
 # Function to handle cloning bp-internal-dev-build on Comma
 clone_internal_dev_build() {
   echo "[-] Cloning bp-internal-dev-build on Comma..."
-  cd /data
-  rm -rf openpilot
-  git clone --recurse-submodules --depth 1 git@github.com:ford-op/sp-dev-c3.git -b bp-internal-dev-build openpilot
-  cd openpilot
-  scons -j"$(nproc)"
-  sudo reboot
+  cd /data || { echo "[-] Failed to change directory to /data"; exit 1; }
+  rm -rf openpilot || { echo "[-] Failed to remove existing openpilot directory"; exit 1; }
+  git clone --recurse-submodules --depth 1 git@github.com:ford-op/sp-dev-c3.git -b bp-internal-dev-build openpilot || {
+    echo "[-] Failed to clone ford-op/sp-dev-c3 repository."
+    exit 1
+  }
+  cd openpilot || { echo "[-] Failed to change directory to openpilot"; exit 1; }
+  scons -j"$(nproc)" || { echo "[-] SCons build failed."; exit 1; }
+  reboot_device
 }
 
 # Function to handle cloning bp-internal-dev on Comma
 clone_internal_dev() {
   echo "[-] Cloning bp-internal-dev on Comma..."
-  cd /data
-  rm -rf openpilot
-  git clone --recurse-submodules --depth 1 git@github.com:ford-op/sp-dev-c3.git -b bp-internal-dev openpilot
-  cd openpilot
-  scons -j"$(nproc)"
-  sudo reboot
+  cd /data || { echo "[-] Failed to change directory to /data"; exit 1; }
+  rm -rf openpilot || { echo "[-] Failed to remove existing openpilot directory"; exit 1; }
+  git clone --recurse-submodules --depth 1 git@github.com:ford-op/sp-dev-c3.git -b bp-internal-dev openpilot || {
+    echo "[-] Failed to clone ford-op/sp-dev-c3 repository."
+    exit 1
+  }
+  cd openpilot || { echo "[-] Failed to change directory to openpilot"; exit 1; }
+  scons -j"$(nproc)" || { echo "[-] SCons build failed."; exit 1; }
+  reboot_device
 }
 
-# Function to process submodules (existing function retained)
+reboot_device() {
+  read -p "Would you like to reboot the Comma device? (y/N): " confirm
+  if [[ "$confirm" =~ ^[Yy]$ ]]; then
+    echo "[-] Rebooting Comma device..."
+    sudo reboot
+  else
+    echo "Reboot canceled."
+  fi
+}
 
-# Function for public experimental build process
-public_build_process() {
-  local CLONE_BRANCH="bp-public-experimental"
-  local BUILD_BRANCH="staging-DONOTUSE"
-  local COMMIT_DESC_HEADER="bluepilot experimental"
-  local GIT_REPO_ORIGIN="git@github.com:ford-op/sp-dev-c3.git"
-  local GIT_PUBLIC_REPO_ORIGIN="git@github.com:BluePilotDev/bluepilot.git"
+# Function for custom repo clone
+clone_custom_repo_branch() {
+  if [[ -n "$REPO" && -n "$CLONE_BRANCH" ]]; then
+    echo "[-] Performing custom clone with provided parameters:"
+    echo "     Repository: $REPO"
+    echo "     Clone Branch: $CLONE_BRANCH"
+  else
+    echo "[-] Custom Clone Option Selected"
+    echo "Select Repository to Clone:"
+    echo "1) BluePilotDev/bluepilot"
+    echo "2) ford-op/sp-dev-c3"
+    echo "c) Cancel and return to main menu"
+    read -p "Enter your choice: " repo_choice
+    case $repo_choice in
+    1)
+      REPO="bluepilotdev"
+      GIT_REPO_ORIGIN="git@github.com:BluePilotDev/bluepilot.git"
+      ;;
+    2)
+      REPO="sp-dev-c3"
+      GIT_REPO_ORIGIN="git@github.com:ford-op/sp-dev-c3.git"
+      ;;
+    C | c)
+      echo "Returning to main menu."
+      BUILD_TYPE=""
+      show_menu
+      ;;
+    *)
+      echo "Invalid choice. Returning to main menu."
+      BUILD_TYPE=""
+      return
+      ;;
+    esac
 
-  echo "[-] Starting public experimental build process"
+    # Fetch branches
+    clear
+    echo "[-] Fetching list of branches from $GIT_REPO_ORIGIN..."
+    REMOTE_BRANCHES=$(git ls-remote --heads "$GIT_REPO_ORIGIN" 2>&1)
 
-  # Clear build directory
-  echo "[-] Removing existing BUILD_DIR"
-  rm -rf "$BUILD_DIR"
-  rm -rf "$TMP_DIR"
+    if [ $? -ne 0 ]; then
+      echo "[-] Failed to fetch branches from $GIT_REPO_ORIGIN."
+      echo "Error: $REMOTE_BRANCHES"
+      BUILD_TYPE=""
+      return
+    fi
 
-  echo "[-] Cloning $BUILD_BRANCH branch into $BUILD_DIR"
+    REMOTE_BRANCHES=$(echo "$REMOTE_BRANCHES" | awk '{print $2}' | sed 's#refs/heads/##')
+    readarray -t BRANCH_ARRAY <<<"$REMOTE_BRANCHES"
+
+    if [ ${#BRANCH_ARRAY[@]} -eq 0 ]; then
+      echo "[-] No branches found in the repository."
+      BUILD_TYPE=""
+      return
+    fi
+
+    echo "Available branches in $REPO:"
+    for i in "${!BRANCH_ARRAY[@]}"; do
+      printf "%d) %s\n" $((i + 1)) "${BRANCH_ARRAY[i]}"
+    done
+
+    read -p "Select a branch by number: " branch_choice
+    if [[ "$branch_choice" =~ ^[0-9]+$ ]] && [ "$branch_choice" -ge 1 ] && [ "$branch_choice" -le "${#BRANCH_ARRAY[@]}" ]; then
+      SELECTED_BRANCH="${BRANCH_ARRAY[$((branch_choice - 1))]}"
+      CLONE_BRANCH="$SELECTED_BRANCH"
+      BUILD_BRANCH="${CLONE_BRANCH}-build"
+
+      clear
+      echo "Selected branch: $CLONE_BRANCH"
+      echo "Build branch will be: $BUILD_BRANCH"
+    else
+      echo "Invalid branch selection."
+      BUILD_TYPE=""
+      return
+    fi
+  fi
+
+  # Proceed with cloning using REPO and CLONE_BRANCH
+  echo "[-] Cloning repository '$REPO' with branch '$CLONE_BRANCH'..."
+  cd /data
+  echo "[-] Removing existing openpilot directory"
+  rm -rf openpilot
+  GIT_REPO_ORIGIN="git@github.com:ford-op/$REPO.git"
+
+  if [[ "$CLONE_BRANCH" == *-build ]]; then
+    git clone "git@github.com:ford-op/$REPO.git" -b "$CLONE_BRANCH" "$BUILD_DIR" || {
+      echo "[-] Failed to clone repository."
+      exit 1
+    }
+  else
+    git clone --recurse-submodules "git@github.com:ford-op/$REPO.git" -b "$CLONE_BRANCH" "$BUILD_DIR" || {
+      echo "[-] Failed to clone repository."
+      exit 1
+    }
+  fi
+
+  cd /data/openpilot
+  scons -j"$(nproc)" || {
+    echo "[-] Build failed."
+    exit 1
+  }
+  reboot_device
+}
+
+# Function to select repository and branch for custom build
+select_repository() {
+  clear
+  while true; do
+    echo ""
+    echo "Select Repository for Custom Build:"
+    echo "1) BluePilotDev/bluepilot"
+    echo "2) ford-op/sp-dev-c3"
+    echo "c) Cancel and return to main menu"
+    read -p "Enter your choice: " repo_choice
+    case $repo_choice in
+    1)
+      REPO="bluepilotdev"
+      GIT_REPO_ORIGIN="git@github.com:BluePilotDev/bluepilot.git"
+      break
+      ;;
+    2)
+      REPO="sp-dev-c3"
+      GIT_REPO_ORIGIN="git@github.com:ford-op/sp-dev-c3.git"
+      break
+      ;;
+    C | c)
+      echo "Returning to main menu."
+      BUILD_TYPE=""
+      show_menu
+      ;;
+    *)
+      echo "Invalid choice. Please try again."
+      ;;
+    esac
+  done
+
+  # Fetch the list of remote branches
+  clear
+  echo "[-] Fetching list of branches from $GIT_REPO_ORIGIN..."
+  REMOTE_BRANCHES=$(git ls-remote --heads "$GIT_REPO_ORIGIN" 2>&1)
+
+  # Check if git ls-remote command succeeded
+  if [ $? -ne 0 ]; then
+    echo "[-] Failed to fetch branches from $GIT_REPO_ORIGIN."
+    echo "Error: $REMOTE_BRANCHES"
+    BUILD_TYPE=""
+    return
+  fi
+
+  # Process the branches
+  REMOTE_BRANCHES=$(echo "$REMOTE_BRANCHES" | awk '{print $2}' | sed 's#refs/heads/##')
+
+  # Convert branches to an array using readarray
+  readarray -t BRANCH_ARRAY <<<"$REMOTE_BRANCHES"
+
+  if [ ${#BRANCH_ARRAY[@]} -eq 0 ]; then
+    echo "[-] No branches found in the repository."
+    BUILD_TYPE=""
+    return
+  fi
+
+  # Display branches to the user
+  clear
+  echo ""
+  echo "Available branches in $REPO:"
+  for i in "${!BRANCH_ARRAY[@]}"; do
+    printf "%d) %s\n" $((i + 1)) "${BRANCH_ARRAY[i]}"
+  done
+
+  # Prompt user to select a branch
+  while true; do
+    read -p "Select a branch by number (or 'c' to cancel): " branch_choice
+    if [[ "$branch_choice" == "c" || "$branch_choice" == "C" ]]; then
+      echo "Returning to main menu."
+      BUILD_TYPE=""
+      return
+    elif [[ "$branch_choice" =~ ^[0-9]+$ ]] && [ "$branch_choice" -ge 1 ] && [ "$branch_choice" -le "${#BRANCH_ARRAY[@]}" ]; then
+      SELECTED_BRANCH="${BRANCH_ARRAY[$((branch_choice - 1))]}"
+      CLONE_BRANCH="$SELECTED_BRANCH"
+      BUILD_BRANCH="${CLONE_BRANCH}-build"
+      clear
+      echo "Selected branch: $CLONE_BRANCH"
+      echo "Build branch will be: $BUILD_BRANCH"
+      break
+    else
+      echo "Invalid choice. Please enter a valid number or 'c' to cancel."
+    fi
+  done
+}
+
+# Function for cross-repo branch build process
+build_cross_repo_branch() {
+  local CLONE_BRANCH="$1"
+  local BUILD_BRANCH="$2"
+  local COMMIT_DESC_HEADER="$3"
+  local GIT_REPO_ORIGIN="$4"
+  local GIT_PUBLIC_REPO_ORIGIN="$5"
+
+  echo "[-] Starting cross-repo branch build process"
+  echo "[-] Cloning $GIT_REPO_ORIGIN | Branch: $CLONE_BRANCH"
+
+  echo "[-] Removing existing directories"
+  rm -rf "$BUILD_DIR" "$TMP_DIR"
+
+  echo "[-] Cloning $GIT_PUBLIC_REPO_ORIGIN Repo to $BUILD_DIR"
   git clone --single-branch --branch "$BUILD_BRANCH" "$GIT_PUBLIC_REPO_ORIGIN" "$BUILD_DIR"
 
   cd "$BUILD_DIR"
@@ -377,9 +678,9 @@ public_build_process() {
   echo "[-] Cloning $GIT_REPO_ORIGIN Repo to $TMP_DIR"
   git clone --recurse-submodules --depth 1 "$GIT_REPO_ORIGIN" -b "$CLONE_BRANCH" "$TMP_DIR"
 
-  # Change to the TMP_DIR
   cd "$TMP_DIR"
 
+  echo "[-] Processing submodules in TMP_DIR"
   process_submodules "$TMP_DIR"
 
   cd "$BUILD_DIR"
@@ -388,6 +689,7 @@ public_build_process() {
   rsync -a --exclude='.git' "$TMP_DIR/" "$BUILD_DIR/"
 
   # Remove the TMP_DIR
+  echo "[-] Removing TMP_DIR"
   rm -rf "$TMP_DIR"
 
   setup_git_env
@@ -399,31 +701,28 @@ public_build_process() {
 
   create_prebuilt_marker
 
-  # Prepare and push commit
   prepare_commit_push "$COMMIT_DESC_HEADER" "$GIT_PUBLIC_REPO_ORIGIN" "$BUILD_BRANCH"
 }
 
-# Function for internal dev build process
-internal_dev_build_process() {
-  local CLONE_BRANCH="bp-internal-dev"
-  local BUILD_BRANCH="bp-internal-dev-build"
-  local COMMIT_DESC_HEADER="bluepilot internal dev"
-  local GIT_REPO_ORIGIN="git@github.com:ford-op/sp-dev-c3.git"
+# Function for single-repo branch build process
+build_repo_branch() {
+  local CLONE_BRANCH="$1"
+  local BUILD_BRANCH="$2"
+  local COMMIT_DESC_HEADER="$3"
+  local GIT_REPO_ORIGIN="$4"
 
-  echo "[-] Starting internal dev build process"
+  echo "[-] Starting single-repo branch build process"
+  echo "[-] Cloning $GIT_REPO_ORIGIN | Branch: $CLONE_BRANCH"
 
-  echo "[-] Cleaning Build Directories"
-  rm -rf "$BUILD_DIR"
-  rm -rf "$TMP_DIR"
+  echo "[-] Removing existing directories"
+  rm -rf "$BUILD_DIR" "$TMP_DIR"
 
-  # Clone repo
+  echo "[-] Cloning $GIT_REPO_ORIGIN Repo to $BUILD_DIR"
   git clone --recurse-submodules "$GIT_REPO_ORIGIN" -b "$CLONE_BRANCH" "$BUILD_DIR"
   cd "$BUILD_DIR"
 
-  # Define git identity and ssh variables
   setup_git_env
 
-  # Build and process
   build_openpilot
   handle_panda_directory
   process_submodules "$BUILD_DIR"
@@ -433,8 +732,23 @@ internal_dev_build_process() {
 
   create_prebuilt_marker
 
-  # Prepare and push commit
   prepare_commit_push "$COMMIT_DESC_HEADER" "$GIT_REPO_ORIGIN" "$BUILD_BRANCH"
+}
+
+# Function for custom build process
+custom_build_process() {
+  if [ -z "$REPO" ] || [ -z "$CLONE_BRANCH" ] || [ -z "$BUILD_BRANCH" ]; then
+    echo "Error: --custom-build requires --repo, --clone-branch, and --build-branch parameters."
+    show_help
+    exit 1
+  fi
+
+#   echo "[-] Starting custom build process for repository '$REPO' with clone branch '$CLONE_BRANCH' and build branch '$BUILD_BRANCH'"
+
+  local GIT_REPO_ORIGIN="git@github.com:ford-op/$REPO.git"
+  local COMMIT_DESC_HEADER="Custom Build"
+
+  build_repo_branch "$CLONE_BRANCH" "$BUILD_BRANCH" "$COMMIT_DESC_HEADER" "$GIT_REPO_ORIGIN"
 }
 
 # Function to prepare the commit
@@ -442,6 +756,13 @@ prepare_commit_push() {
   local COMMIT_DESC_HEADER=$1
   local ORIGIN_REPO=$2
   local BUILD_BRANCH=$3
+
+  # Ensure version.h exists
+  if [ ! -f "$BUILD_DIR/common/version.h" ]; then
+    echo "Error: $BUILD_DIR/common/version.h not found."
+    exit 1
+  fi
+
   VERSION=$(date '+%Y.%m.%d')
   TIME_CODE=$(date +"%H%M")
   GIT_HASH=$(git rev-parse HEAD)
@@ -496,7 +817,7 @@ master commit: $GIT_HASH
   git branch -m "$BUILD_BRANCH"
 
   # Force push the new build branch to the remote repository
-  echo "[-] Force pushing to $BUILD_BRANCH branch of remote repo $ORIGIN_REPO T=$SECONDS"
+  echo "[-] Force pushing to $BUILD_BRANCH branch to remote repo $ORIGIN_REPO T=$SECONDS"
   git push -f "$ORIGIN_REPO" "$BUILD_BRANCH" || {
     echo "[-] Failed to push to remote branch $BUILD_BRANCH"
     exit 1
@@ -510,14 +831,15 @@ main() {
   while true; do
     if [ -z "$BUILD_TYPE" ]; then
       show_menu
+      continue
     fi
 
     case "$BUILD_TYPE" in
     public)
-      public_build_process
+      build_cross_repo_branch "bp-public-experimental" "staging-DONOTUSE" "bluepilot experimental" "git@github.com:ford-op/sp-dev-c3.git" "git@github.com:BluePilotDev/bluepilot.git"
       ;;
     dev)
-      internal_dev_build_process
+      build_repo_branch "bp-internal-dev" "bp-internal-dev-build" "bluepilot internal dev" "git@github.com:ford-op/sp-dev-c3.git"
       ;;
     clone-public-bp)
       clone_public_bluepilot
@@ -528,6 +850,12 @@ main() {
     clone-internal-dev)
       clone_internal_dev
       ;;
+    custom-clone)
+      clone_custom_repo_branch
+      ;;
+    custom-build)
+      custom_build_process
+      ;;
     *)
       echo "Invalid build type. Exiting."
       exit 1
@@ -536,10 +864,23 @@ main() {
 
     echo "[-] Action completed successfully T=$SECONDS"
 
-    # Reset BUILD_TYPE to show menu again
     BUILD_TYPE=""
+    REPO=""
+    CLONE_BRANCH=""
+    BUILD_BRANCH=""
+
+    # Add this line to break the loop after a successful build
+    break
   done
 }
+
+# Show menu if BUILD_TYPE is not set via command line
+if [ -z "$BUILD_TYPE" ]; then
+  show_menu
+fi
+
+# Set environment variables
+set_env_vars
 
 # Run the main function
 main
