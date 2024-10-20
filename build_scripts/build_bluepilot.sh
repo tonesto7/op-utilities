@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 # Script Version
-SCRIPT_VERSION="1.3.0"
-SCRIPT_MODIFIED="2021-09-26"
+SCRIPT_VERSION="1.4.0"
+SCRIPT_MODIFIED="2021-10-20"
 
 set -e
 set -o pipefail # Ensures that the script catches errors in piped commands
@@ -852,7 +852,7 @@ main() {
 
         case "$SCRIPT_ACTION" in
         build-public)
-            build_cross_repo_branch "bp-public-experimental" "staging-DONOTUSE" "bluepilot experimental" "$GIT_BP_PUBLIC_REPO" "$GIT_BP_PUBLIC_REPO"
+            build_cross_repo_branch "bp-public-experimental" "staging-DONOTUSE" "bluepilot experimental" "$GIT_BP_PRIVATE_REPO" "$GIT_BP_PUBLIC_REPO"
             ;;
         build-dev)
             build_repo_branch "bp-internal-dev" "bp-internal-dev-build" "bluepilot internal dev" "$GIT_BP_PRIVATE_REPO"
