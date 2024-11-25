@@ -471,6 +471,7 @@ clone_repo() {
     local repo_url="$2"
     local branch="$3"
     local build="$4" # "yes" or "no"
+    local skip_reboot="${5:-no}" # New parameter with default value "no"
 
     echo "[-] Cloning $description on Comma..."
     cd /data || {
@@ -506,7 +507,11 @@ clone_repo() {
             exit 1
         }
     fi
-    reboot_device
+    
+    # Only call reboot_device if skip_reboot is "no"
+    if [ "$skip_reboot" != "yes" ]; then
+        reboot_device
+    fi
 }
 
 clone_public_bluepilot() {
@@ -628,7 +633,7 @@ clone_custom_repo() {
         echo "     Repository: $REPO"
         echo "     Clone Branch: $CLONE_BRANCH"
         if [[ "$CLONE_BRANCH" != *-build* ]]; then
-            BUILD_FLAG="yes"
+            BUILD_FLAG="no"
         else
             BUILD_FLAG="no"
         fi
@@ -654,8 +659,28 @@ clone_custom_repo() {
         ;;
     esac
 
-    # Proceed with cloning using clone_repo function
-    clone_repo "repository '$REPO' with branch '$CLONE_BRANCH'" "$GIT_REPO_URL" "$CLONE_BRANCH" "$BUILD_FLAG"
+    # Pass "yes" as the skip_reboot parameter
+    clone_repo "repository '$REPO' with branch '$CLONE_BRANCH'" "$GIT_REPO_URL" "$CLONE_BRANCH" "$BUILD_FLAG" "yes"
+
+    # After cloning, check for prebuilt file
+    if [ ! -f "/data/openpilot/prebuilt" ]; then
+        echo "[-] No prebuilt marker found. This branch may need to be compiled."
+        read -p "Would you like to run scons compilation now? (y/N): " compile_confirm
+        if [[ "$compile_confirm" =~ ^[Yy]$ ]]; then
+            echo "[-] Running scons compilation..."
+            cd /data/openpilot
+            scons -j"$(nproc)" || {
+                echo "[-] SCons build failed."
+                exit 1
+            }
+            echo "[-] Compilation completed successfully."
+        else
+            echo "[-] Skipping compilation."
+        fi
+    fi
+
+    # Now ask about reboot
+    reboot_device
 }
 
 # Function to select repository and branch for custom build
