@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 # Script Version
-SCRIPT_VERSION="1.4.0"
-SCRIPT_MODIFIED="2021-10-20"
+SCRIPT_VERSION="1.5.0"
+SCRIPT_MODIFIED="2024-11-25"
 
 set -e
 set -o pipefail # Ensures that the script catches errors in piped commands
@@ -20,6 +20,7 @@ reset_variables() {
 OS=$(uname)
 GIT_BP_PUBLIC_REPO="git@github.com:BluePilotDev/bluepilot.git"
 GIT_BP_PRIVATE_REPO="git@github.com:ford-op/sp-dev-c3.git"
+GIT_SP_REPO="git@github.com:sunnypilot/sunnypilot.git"
 
 # Determine the build directory based on the OS
 if [ "$OS" = "Darwin" ]; then
@@ -540,6 +541,7 @@ choose_repository_and_branch() {
         echo "Select Repository:"
         echo "1) BluePilotDev/bluepilot"
         echo "2) ford-op/sp-dev-c3"
+        echo "3) sunnypilot/sunnypilot"
         echo "c) Cancel and return to main menu"
         read -p "Enter your choice: " repo_choice
         case $repo_choice in
@@ -550,6 +552,10 @@ choose_repository_and_branch() {
         2)
             REPO="sp-dev-c3"
             GIT_REPO_ORIGIN="$GIT_BP_PRIVATE_REPO"
+            ;;
+        3)
+            REPO="sunnypilot"
+            GIT_REPO_ORIGIN="$GIT_SP_REPO"
             ;;
         C | c)
             echo "Returning to main menu."
@@ -638,6 +644,9 @@ clone_custom_repo() {
         ;;
     sp-dev-c3)
         GIT_REPO_URL="$GIT_BP_PRIVATE_REPO"
+        ;;
+    sunnypilot)
+        GIT_REPO_URL="$GIT_SP_REPO"
         ;;
     *)
         echo "[-] Unknown repository: $REPO"
