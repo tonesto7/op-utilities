@@ -3,7 +3,7 @@
 ###############################################################################
 # Global Variables (from both scripts)
 ###############################################################################
-SCRIPT_VERSION="2.0.0"
+SCRIPT_VERSION="2.0.1"
 SCRIPT_MODIFIED="2024-12-10"
 
 ssh_status=()
@@ -602,11 +602,45 @@ shutdown_device() {
 # Downloads latest version from GitHub
 update_script() {
     echo "Downloading the latest version of the script..."
-    wget https://raw.githubusercontent.com/tonesto7/op-utilities/main/CommaUtility.sh -O CommaUtility.sh
-    chmod +x CommaUtility.sh
-    echo "Script updated successfully. Restarting the updated script."
-    read -p "Press enter to continue..."
-    exec /data/CommaUtility.sh
+
+    # Create backup of current script
+    cp /data/CommaUtility.sh /data/CommaUtility.sh.backup
+
+    if wget -O /data/CommaUtility.sh.tmp https://raw.githubusercontent.com/tonesto7/op-utilities/main/CommaUtility.sh; then
+        # If download successful, replace old script
+        mv /data/CommaUtility.sh.tmp /data/CommaUtility.sh
+        chmod +x /data/CommaUtility.sh
+        echo "Script updated successfully. Restarting the updated script."
+        read -p "Press enter to continue..."
+        exec /data/CommaUtility.sh
+    else
+        echo "Update failed. Restoring backup..."
+        mv /data/CommaUtility.sh.backup /data/CommaUtility.sh
+        rm -f /data/CommaUtility.sh.tmp
+        read -p "Press enter to continue..."
+    fi
+}
+
+check_for_updates() {
+    echo "Checking for script updates..."
+    # Download version info from latest script
+    latest_version=$(wget -qO- https://raw.githubusercontent.com/tonesto7/op-utilities/main/CommaUtility.sh | grep "SCRIPT_VERSION=" | head -n 1 | cut -d'"' -f2)
+
+    if [ -z "$latest_version" ]; then
+        echo "Unable to check for updates. Please check your internet connection."
+        return 1
+    fi
+
+    # Compare versions
+    if [ "$SCRIPT_VERSION" != "$latest_version" ]; then
+        echo "New version available: v$latest_version (Current: v$SCRIPT_VERSION)"
+        read -p "Would you like to update now? (y/N): " update_choice
+        if [[ "$update_choice" =~ ^[Yy]$ ]]; then
+            update_script
+        fi
+    else
+        echo "Script is up to date (v$SCRIPT_VERSION)"
+    fi
 }
 
 ###############################################################################
@@ -1379,6 +1413,7 @@ main() {
     while true; do
         if [ -z "$SCRIPT_ACTION" ]; then
             # No arguments provided or no action set by arguments: show main menu
+            check_for_updates
             while true; do
                 clear
                 check_root_space
