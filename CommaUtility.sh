@@ -1,23 +1,6 @@
 #!/bin/bash
 
 ###############################################################################
-# Combined CommaUtility and BluePilot Utility Script with Full Functionality
-#
-# This script merges the CommaUtility.sh and build_bluepilot.sh scripts into one,
-# preserving all logic and functionality, including:
-# - Nested menus for easier navigation.
-# - SSH, Git/Openpilot repo, and system utilities from CommaUtility.
-# - BluePilot build and clone functionalities from build_bluepilot.
-# - Full argument parsing and help options from build_bluepilot.
-# - Removal of SSH fingerprint display per user request.
-#
-# If script arguments are provided, it will follow the build_bluepilot logic,
-# allowing non-interactive builds, clones, and updates.
-# Without arguments, it shows a nested menu system for interactive use.
-#
-###############################################################################
-
-###############################################################################
 # Global Variables (from both scripts)
 ###############################################################################
 SCRIPT_VERSION="2.0.0"
