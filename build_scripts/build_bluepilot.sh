@@ -1,3 +1,4 @@
+# build_bluepilot.sh
 #!/usr/bin/env bash
 
 # Script Version

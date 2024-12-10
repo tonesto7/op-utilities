@@ -1410,7 +1410,7 @@ main() {
                 echo "----------------------------------------------"
                 echo ""
                 echo "1. SSH Setup"
-                echo "2. Openpilot Folder Tools"
+                echo "2. Openpilot Folder Git"
                 echo "3. BluePilot Utilities"
                 echo "4. View Logs"
                 echo "5. View Recent Error"
