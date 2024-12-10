@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # Script Version
-SCRIPT_VERSION="1.1.0"
-SCRIPT_MODIFIED="2021-09-26"
+SCRIPT_VERSION="1.2.0"
+SCRIPT_MODIFIED="2024-12-10"
 
 # Function to display SSH status
 display_ssh_status() {
-    echo "+---------------------------------+"
-    echo "|          SSH Status             |"
-    echo "+---------------------------------+"
+    echo "+--------------------------------------------------------------------------+"
+    echo "|          SSH Status                                                      |"
+    echo "+--------------------------------------------------------------------------+"
 
     # Define the expected owner and permissions
     expected_owner="comma"
@@ -72,14 +72,39 @@ display_ssh_status() {
         ssh_status+=("missing_usr")
     fi
 
-    echo "+---------------------------------+"
+    # Check SSH backup status
+    if [ -f "/data/ssh_backup/github" ] && [ -f "/data/ssh_backup/github.pub" ] && [ -f "/data/ssh_backup/config" ]; then
+        echo "- SSH Backup Status: ✅"
+        if [ -f "/data/ssh_backup/metadata.txt" ]; then
+            backup_date=$(grep "Backup Date:" /data/ssh_backup/metadata.txt | cut -d: -f2- | xargs)
+            ssh_fingerprint=$(grep "SSH Key Fingerprint:" /data/ssh_backup/metadata.txt | cut -d: -f2- | xargs)
+            echo "  └─ Last Backup: $backup_date"
+            echo "  └─ Key Fingerprint: $ssh_fingerprint"
+
+            # Verify if backup matches current SSH files
+            if [ -f "/home/comma/.ssh/github" ]; then
+                if diff -q "/home/comma/.ssh/github" "/data/ssh_backup/github" >/dev/null; then
+                    echo "  └─ Backup is current with active SSH files"
+                else
+                    echo "  └─ Backup differs from active SSH files"
+                fi
+            fi
+        else
+            echo "  └─ Backup metadata not found"
+        fi
+    else
+        echo "- SSH Backup Status: ❌"
+        ssh_status+=("no_backup")
+    fi
+
+    echo "+--------------------------------------------------------------------------+"
 }
 
 # Function to display Git repo status
 display_git_status() {
-    echo "+---------------------------------+"
-    echo "|       Openpilot Repository      |"
-    echo "+---------------------------------+"
+    echo "+--------------------------------------------------------------------------+"
+    echo "|       Openpilot Repository                                               |"
+    echo "+--------------------------------------------------------------------------+"
 
     # Check for /data/openpilot and display current branch and repo name
     if [ -d /data/openpilot ]; then
@@ -94,14 +119,14 @@ display_git_status() {
         echo "- Openpilot directory: ❌"
     fi
 
-    echo "+---------------------------------+"
+    echo "+--------------------------------------------------------------------------+"
 }
 
 # Function to display available branches
 list_git_branches() {
-    echo "+---------------------------------+"
-    echo "|        Available Branches       |"
-    echo "+---------------------------------+"
+    echo "+--------------------------------------------------------------------------+"
+    echo "|        Available Branches                                                |"
+    echo "+--------------------------------------------------------------------------+"
     if [ -d /data/openpilot ]; then
         cd /data/openpilot
         branches=$(git branch --all)
@@ -114,7 +139,7 @@ list_git_branches() {
     else
         echo "Openpilot directory does not exist."
     fi
-    echo "+---------------------------------+"
+    echo "+--------------------------------------------------------------------------+"
     read -p "Press enter to continue..."
 }
 
@@ -123,11 +148,11 @@ display_general_status() {
     agnos_version=$(cat /VERSION)
     build_time=$(awk 'NR==2' /BUILD)
 
-    echo "+---------------------------------+"
-    echo "|           Other Items           |"
-    echo "+---------------------------------+"
+    echo "+--------------------------------------------------------------------------+"
+    echo "|           Other Items                                                    |"
+    echo "+--------------------------------------------------------------------------+"
     echo "- AGNOS: v$agnos_version ($build_time)"
-    echo "+---------------------------------+"
+    echo "+--------------------------------------------------------------------------+"
 }
 
 # Function to create SSH config
@@ -139,6 +164,82 @@ Host github.com
   AddKeysToAgent yes
   IdentityFile /home/comma/.ssh/github
 EOF
+}
+
+# Function to check if valid SSH backup exists
+check_ssh_backup() {
+    if [ -f "/data/ssh_backup/github" ] && [ -f "/data/ssh_backup/github.pub" ] && [ -f "/data/ssh_backup/config" ]; then
+        return 0 # Valid backup exists
+    else
+        return 1 # No valid backup
+    fi
+}
+
+# Function to backup SSH files
+backup_ssh_files() {
+    echo "Backing up SSH files..."
+    if [ -f "/home/comma/.ssh/github" ] && [ -f "/home/comma/.ssh/github.pub" ] && [ -f "/home/comma/.ssh/config" ]; then
+        mkdir -p /data/ssh_backup
+        cp /home/comma/.ssh/github /data/ssh_backup/
+        cp /home/comma/.ssh/github.pub /data/ssh_backup/
+        cp /home/comma/.ssh/config /data/ssh_backup/
+        sudo chown comma:comma /data/ssh_backup -R
+        sudo chmod 600 /data/ssh_backup/github
+        save_backup_metadata
+        echo "SSH files backed up successfully to /data/ssh_backup/"
+    else
+        echo "No valid SSH files found to backup"
+    fi
+    read -p "Press enter to continue..."
+}
+
+# Function to restore SSH files
+restore_ssh_files() {
+    echo "Restoring SSH files..."
+    if check_ssh_backup; then
+        echo "Found backup with the following information:"
+        get_backup_metadata
+        read -p "Do you want to proceed with restore? (y/N): " confirm
+        if [[ $confirm =~ ^[Yy]$ ]]; then
+            # Remove existing SSH contents
+            remove_ssh_contents
+
+            # Restore from backup
+            mkdir -p /home/comma/.ssh
+            cp /data/ssh_backup/* /home/comma/.ssh/
+            rm -f /home/comma/.ssh/metadata.txt # Don't copy metadata to SSH directory
+            sudo chown comma:comma /home/comma/.ssh -R
+            sudo chmod 600 /home/comma/.ssh/github
+
+            # Copy to persistent storage
+            copy_ssh_config_and_keys
+            echo "SSH files restored successfully"
+        else
+            echo "Restore cancelled"
+        fi
+    else
+        echo "No valid SSH backup found to restore"
+    fi
+    read -p "Press enter to continue..."
+}
+
+# Function to save backup metadata
+save_backup_metadata() {
+    local backup_time=$(date '+%Y-%m-%d %H:%M:%S')
+    local ssh_key_fingerprint=$(ssh-keygen -lf /data/ssh_backup/github.pub 2>/dev/null | awk '{print $2}')
+    cat >/data/ssh_backup/metadata.txt <<EOF
+Backup Date: $backup_time
+SSH Key Fingerprint: $ssh_key_fingerprint
+EOF
+}
+
+# Function to read backup metadata
+get_backup_metadata() {
+    if [ -f "/data/ssh_backup/metadata.txt" ]; then
+        cat /data/ssh_backup/metadata.txt
+    else
+        echo "No backup metadata found"
+    fi
 }
 
 # Create a function to fetch and pull the latest changes from the repository
@@ -196,10 +297,15 @@ repair_create_ssh() {
 
 # Function to reset SSH setup
 reset_ssh() {
+    # Backup existing SSH files if they exist
+    if [ -f "/home/comma/.ssh/github" ]; then
+        backup_ssh_files
+    fi
     remove_ssh_contents
     create_ssh_config
     generate_ssh_key
     copy_ssh_config_and_keys
+    backup_ssh_files # Backup the new SSH files
     test_ssh_connection
     read -p "Press enter to continue..."
 }
@@ -364,9 +470,9 @@ while true; do
     clear
 
     # Display the Script version and last modified date
-    echo "+---------------------------------+"
-    echo "|      CommaUtility Script        |"
-    echo "+---------------------------------+"
+    echo "+--------------------------------------------------------------------------+"
+    echo "|      CommaUtility Script                                                 |"
+    echo "+--------------------------------------------------------------------------+"
     echo "Version: $SCRIPT_VERSION"
     echo "Last Modified: $SCRIPT_MODIFIED"
     echo ""
@@ -383,7 +489,14 @@ while true; do
     echo "3. Reset SSH setup"
     echo "4. Test SSH connection"
     echo "5. View SSH key"
+    if [ -f "/home/comma/.ssh/github" ]; then
+        echo "B. Backup SSH files"
+    fi
+    if check_ssh_backup; then
+        echo "X. Restore SSH files from backup"
+    fi
     echo ""
+
     display_git_status
     echo "6. Fetch and pull latest changes"
     echo "7. Change branch"
@@ -396,7 +509,7 @@ while true; do
     echo "R. Reboot device"
     echo "S. Shutdown device"
     echo "BP. Download BluePilot Utility"
-    echo "U. Update script"
+    echo "U. Update this script"
     echo "Q. Exit"
     read -p "Enter your choice [1-10] or [Q] to Exit: " choice
 
@@ -406,6 +519,16 @@ while true; do
     3) reset_ssh ;;
     4) test_ssh_connection ;;
     5) view_ssh_key ;;
+    b | B)
+        if [ -f "/home/comma/.ssh/github" ]; then
+            backup_ssh_files
+        fi
+        ;;
+    x | X)
+        if check_ssh_backup; then
+            restore_ssh_files
+        fi
+        ;;
     6) fetch_pull_latest_changes ;;
     7) change_branch ;;
     8) clone_openpilot_repo "true" ;;
