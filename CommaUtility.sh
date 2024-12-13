@@ -3,8 +3,8 @@
 ###############################################################################
 # Global Variables (from both scripts)
 ###############################################################################
-SCRIPT_VERSION="2.0.1"
-SCRIPT_MODIFIED="2024-12-10"
+SCRIPT_VERSION="2.0.2"
+SCRIPT_MODIFIED="2024-12-12"
 
 ssh_status=()
 
@@ -1180,11 +1180,11 @@ ssh_menu() {
         echo "Q. Back to Main Menu"
         read -p "Enter your choice: " choice
         case $choice in
-        1) repair_create_ssh ;;
-        2) copy_ssh_config_and_keys ;;
-        3) reset_ssh ;;
-        4) test_ssh_connection ;;
-        5) view_ssh_key ;;
+        1) clear; repair_create_ssh ;;
+        2) clear; copy_ssh_config_and_keys ;;
+        3) clear; reset_ssh ;;
+        4) clear; test_ssh_connection ;;
+        5) clear; view_ssh_key ;;
         b | B)
             if [ -f "/home/comma/.ssh/github" ]; then
                 backup_ssh_files
@@ -1213,11 +1213,11 @@ git_menu() {
         echo "Q. Back to Main Menu"
         read -p "Enter your choice: " choice
         case $choice in
-        1) fetch_pull_latest_changes ;;
-        2) change_branch ;;
-        3) clone_openpilot_repo "true" ;;
-        4) reset_openpilot_repo ;;
-        5) list_git_branches ;;
+        1) clear; fetch_pull_latest_changes ;;
+        2) clear; change_branch ;;
+        3) clear; clone_openpilot_repo "true" ;;
+        4) clear; reset_openpilot_repo ;;
+        5) clear; list_git_branches ;;
         q | Q) break ;;
         *) echo "Invalid choice." ;;
         esac
@@ -1242,31 +1242,31 @@ bluepilot_menu() {
         read -p "Enter your choice: " choice
         case $choice in
         1)
-            build_repo_branch "bp-internal-dev" "bp-internal-dev-build" "bluepilot internal dev" "$GIT_BP_PRIVATE_REPO"
+            clear; build_repo_branch "bp-internal-dev" "bp-internal-dev-build" "bluepilot internal dev" "$GIT_BP_PRIVATE_REPO"
             read -p "Press enter..."
             ;;
         2)
-            build_cross_repo_branch "bp-public-experimental" "staging-DONOTUSE" "bluepilot experimental" "$GIT_BP_PRIVATE_REPO" "$GIT_BP_PUBLIC_REPO"
+            clear; build_cross_repo_branch "bp-public-experimental" "staging-DONOTUSE" "bluepilot experimental" "$GIT_BP_PRIVATE_REPO" "$GIT_BP_PUBLIC_REPO"
             read -p "Press enter..."
             ;;
         3)
-            custom_build_process
+            clear; custom_build_process
             read -p "Press enter..."
             ;;
         4)
-            clone_public_bluepilot
+            clear; clone_public_bluepilot
             read -p "Press enter..."
             ;;
         5)
-            clone_internal_dev_build
+            clear; clone_internal_dev_build
             read -p "Press enter..."
             ;;
         6)
-            clone_internal_dev
+            clear; clone_internal_dev
             read -p "Press enter..."
             ;;
         7)
-            clone_custom_repo
+            clear; clone_custom_repo
             read -p "Press enter..."
             ;;
         q | Q) break ;;
