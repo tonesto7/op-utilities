@@ -3,7 +3,7 @@
 ###############################################################################
 # Global Variables (from both scripts)
 ###############################################################################
-SCRIPT_VERSION="2.0.2"
+SCRIPT_VERSION="2.0.3"
 SCRIPT_MODIFIED="2024-12-12"
 
 ssh_status=()
@@ -480,9 +480,13 @@ clone_openpilot_repo() {
     cd /data
     rm -rf ./openpilot
     if [ "$shallow" = true ]; then
-        git clone -b "$branch_name" --depth 1 --recurse-submodules git@github.com:"$github_repo" openpilot
+        git clone -b "$branch_name" --depth 1 git@github.com:"$github_repo" openpilot
+        cd openpilot
+        git submodule update --init --recursive
     else
-        git clone -b "$branch_name" --recurse-submodules git@github.com:"$github_repo" openpilot
+        git clone -b "$branch_name" git@github.com:"$github_repo" openpilot
+        cd openpilot
+        git submodule update --init --recursive
     fi
     cd openpilot
     read -p "Press enter to continue..."
@@ -939,8 +943,9 @@ build_cross_repo_branch() {
     git clone --single-branch --branch "$BUILD_BRANCH" "$GIT_PUBLIC_REPO_ORIGIN" "$BUILD_DIR"
     cd "$BUILD_DIR"
     find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
-    git clone --recurse-submodules --depth 1 "$GIT_REPO_ORIGIN" -b "$CLONE_BRANCH" "$TMP_DIR"
+    git clone --depth 1 "$GIT_REPO_ORIGIN" -b "$CLONE_BRANCH" "$TMP_DIR"
     cd "$TMP_DIR"
+    git submodule update --init --recursive
     process_submodules "$TMP_DIR"
     cd "$BUILD_DIR"
     rsync -a --exclude='.git' "$TMP_DIR/" "$BUILD_DIR/"
@@ -962,8 +967,9 @@ build_repo_branch() {
     local GIT_REPO_ORIGIN="$4"
 
     rm -rf "$BUILD_DIR" "$TMP_DIR"
-    git clone --recurse-submodules "$GIT_REPO_ORIGIN" -b "$CLONE_BRANCH" "$BUILD_DIR"
+    git clone "$GIT_REPO_ORIGIN" -b "$CLONE_BRANCH" "$BUILD_DIR"
     cd "$BUILD_DIR"
+    git submodule update --init --recursive
     setup_git_env_bp
     build_openpilot_bp
     handle_panda_directory
@@ -985,12 +991,16 @@ clone_repo_bp() {
     cd /data || exit 1
     rm -rf openpilot
     if [[ "$branch" != *-build* ]]; then
-        git clone --recurse-submodules --depth 1 "${repo_url}" -b "${branch}" openpilot || exit 1
+        git clone --depth 1 "${repo_url}" -b "${branch}" openpilot || exit 1
+        cd openpilot || exit 1
+        git submodule update --init --recursive
     else
         git clone --depth 1 "${repo_url}" -b "${branch}" openpilot || exit 1
+        cd openpilot || exit 1
+        git submodule update --init --recursive
     fi
 
-    cd openpilot || exit 1
+    # cd openpilot || exit 1
 
     if [ "$build" == "yes" ]; then
         scons -j"$(nproc)" || exit 1
