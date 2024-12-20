@@ -3,8 +3,8 @@
 ###############################################################################
 # Global Variables (from both scripts)
 ###############################################################################
-SCRIPT_VERSION="2.0.3"
-SCRIPT_MODIFIED="2024-12-12"
+SCRIPT_VERSION="2.0.4"
+SCRIPT_MODIFIED="2024-12-20"
 
 ssh_status=()
 
@@ -172,6 +172,9 @@ create_ssh_config() {
 Host github.com
   AddKeysToAgent yes
   IdentityFile /home/comma/.ssh/github
+  Hostname ssh.github.com
+  Port 443
+  User git
 EOF
 }
 
@@ -186,6 +189,44 @@ check_ssh_backup() {
         return 1 # No valid backup
     fi
 }
+
+# Function to check SSH config completeness
+check_ssh_config_completeness() {
+    local config_file="/home/comma/.ssh/config"
+    local missing_keys=()
+
+    # Check if config file exists
+    if [ ! -f "$config_file" ]; then
+        echo "SSH config file is missing."
+        return 1
+    fi
+
+    # Check for specific keys
+    grep -q "AddKeysToAgent yes" "$config_file" || missing_keys+=("AddKeysToAgent")
+    grep -q "IdentityFile /home/comma/.ssh/github" "$config_file" || missing_keys+=("IdentityFile")
+    grep -q "Hostname ssh.github.com" "$config_file" || missing_keys+=("Hostname")
+    grep -q "Port 443" "$config_file" || missing_keys+=("Port")
+    grep -q "User git" "$config_file" || missing_keys+=("User")
+
+    # If missing keys, return false
+    if [ ${#missing_keys[@]} -gt 0 ]; then
+        echo "Missing SSH config keys: ${missing_keys[*]}"
+        return 1
+    fi
+
+    return 0
+}
+
+# Function to update SSH config to port 443
+update_ssh_config_port() {
+    echo "Updating SSH config to use port 443..."
+    create_ssh_config  # Recreate config with port 443
+    copy_ssh_config_and_keys
+    backup_ssh_files
+    echo "SSH config updated successfully."
+    read -p "Press enter to continue..."
+}
+
 
 ###############################################################################
 # SSH Management Functions
@@ -1181,6 +1222,7 @@ ssh_menu() {
         echo "3. Reset SSH setup"
         echo "4. Test SSH connection"
         echo "5. View SSH key"
+        echo "6. Change Github SSH port to 443"
         if [ -f "/home/comma/.ssh/github" ]; then
             echo "B. Backup SSH files"
         fi
@@ -1195,6 +1237,7 @@ ssh_menu() {
         3) clear; reset_ssh ;;
         4) clear; test_ssh_connection ;;
         5) clear; view_ssh_key ;;
+        6) clear; change_github_ssh_port ;;
         b | B)
             if [ -f "/home/comma/.ssh/github" ]; then
                 backup_ssh_files
@@ -1424,6 +1467,22 @@ main() {
         if [ -z "$SCRIPT_ACTION" ]; then
             # No arguments provided or no action set by arguments: show main menu
             check_for_updates
+
+            # SSH Configuration Check
+            if ! check_ssh_config_completeness; then
+                echo "+----------------------------------------------+"
+                echo "|        SSH Configuration Issue Detected      |"
+                echo "+----------------------------------------------+"
+                read -p "Would you like to automatically fix the SSH configuration? (y/N): " ssh_fix_choice
+                if [[ "$ssh_fix_choice" =~ ^[Yy]$ ]]; then
+                    create_ssh_config
+                    copy_ssh_config_and_keys
+                    backup_ssh_files
+                    echo "SSH configuration updated successfully."
+                    read -p "Press enter to continue..."
+                fi
+            fi
+
             while true; do
                 clear
                 check_root_space
