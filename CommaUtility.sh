@@ -3,7 +3,7 @@
 ###############################################################################
 # Global Variables (from both scripts)
 ###############################################################################
-SCRIPT_VERSION="2.0.4"
+SCRIPT_VERSION="2.0.5"
 SCRIPT_MODIFIED="2024-12-20"
 
 ssh_status=()
@@ -217,13 +217,13 @@ check_ssh_config_completeness() {
     return 0
 }
 
-# Function to update SSH config to port 443
-update_ssh_config_port() {
-    echo "Updating SSH config to use port 443..."
+# Function to update github SSH config to port 443
+change_github_ssh_port() {
+    echo "Updating github SSH config to use port 443..."
     create_ssh_config  # Recreate config with port 443
     copy_ssh_config_and_keys
     backup_ssh_files
-    echo "SSH config updated successfully."
+    echo "github SSH config updated successfully."
     read -p "Press enter to continue..."
 }
 
@@ -1471,13 +1471,11 @@ main() {
             # SSH Configuration Check
             if ! check_ssh_config_completeness; then
                 echo "+----------------------------------------------+"
-                echo "|        SSH Configuration Issue Detected      |"
+                echo "|      SSH Configuration Change Available      |"
                 echo "+----------------------------------------------+"
-                read -p "Would you like to automatically fix the SSH configuration? (y/N): " ssh_fix_choice
+                read -p "Would you like to automatically update your SSH configuration to use port 443 for Github SSH requests? (y/N): " ssh_fix_choice
                 if [[ "$ssh_fix_choice" =~ ^[Yy]$ ]]; then
-                    create_ssh_config
-                    copy_ssh_config_and_keys
-                    backup_ssh_files
+                    change_github_ssh_port
                     echo "SSH configuration updated successfully."
                     read -p "Press enter to continue..."
                 fi
