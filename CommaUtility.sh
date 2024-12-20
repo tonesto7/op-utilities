@@ -21,12 +21,40 @@ GIT_SP_REPO="git@github.com:sunnypilot/sunnypilot.git"
 
 if [ "$OS" = "Darwin" ]; then
     BUILD_DIR="$HOME/Documents/bluepilot-utility/bp-build"
+    SCRIPT_DIR=$(dirname "$0")
 else
     BUILD_DIR="/data/openpilot"
-    SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+    # Get absolute path of script regardless of where it's called from
+    SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd || echo "/data")
+    if [ "$SCRIPT_DIR" = "" ]; then
+        echo "Error: Could not determine script directory"
+        exit 1
+    fi
 fi
 
 TMP_DIR="${BUILD_DIR}-build-tmp"
+
+ensure_directory() {
+    local target_dir="$1"
+    local current_dir=$(pwd)
+    if [ "$current_dir" != "$target_dir" ]; then
+        cd "$target_dir" || {
+            echo "Error: Could not change to directory: $target_dir"
+            return 1
+        }
+        return 0
+    fi
+}
+
+# Ensures we're working with absolute paths
+get_absolute_path() {
+    local path="$1"
+    if [[ "$path" = /* ]]; then
+        echo "$path"
+    else
+        echo "$(cd "$(dirname "$path")" && pwd)/$(basename "$path")"
+    fi
+}
 
 ###############################################################################
 # SSH Status Functions
@@ -238,12 +266,12 @@ change_github_ssh_port() {
 backup_ssh_files() {
     echo "Backing up SSH files..."
     if [ -f "/home/comma/.ssh/github" ] && [ -f "/home/comma/.ssh/github.pub" ] && [ -f "/home/comma/.ssh/config" ]; then
-        mkdir -p /data/ssh_backup
-        cp /home/comma/.ssh/github /data/ssh_backup/
-        cp /home/comma/.ssh/github.pub /data/ssh_backup/
-        cp /home/comma/.ssh/config /data/ssh_backup/
-        sudo chown comma:comma /data/ssh_backup -R
-        sudo chmod 600 /data/ssh_backup/github
+        mkdir -p "/data/ssh_backup"
+        cp "/home/comma/.ssh/github" "/data/ssh_backup/"
+        cp "/home/comma/.ssh/github.pub" "/data/ssh_backup/"
+        cp "/home/comma/.ssh/config" "/data/ssh_backup/"
+        sudo chown comma:comma "/data/ssh_backup" -R
+        sudo chmod 600 "/data/ssh_backup/github"
         save_backup_metadata
         echo "SSH files backed up successfully to /data/ssh_backup/"
     else
@@ -251,6 +279,7 @@ backup_ssh_files() {
     fi
     read -p "Press enter to continue..."
 }
+
 
 # Restores SSH files from backup with verification
 # - Verifies backup exists and is valid
@@ -421,9 +450,9 @@ display_disk_space_short() {
 # Displays condensed Git status for main menu
 # Shows current branch or indicates missing repository
 display_git_status_short() {
-    if [ -d /data/openpilot ]; then
-        cd /data/openpilot
-        branch_name=$(git rev-parse --abbrev-ref HEAD)
+    if [ -d "/data/openpilot" ]; then
+        cd "/data/openpilot" || return
+        branch_name=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
         cd - >/dev/null 2>&1
         echo "| Git Branch: $branch_name"
     else
@@ -439,8 +468,8 @@ display_git_status() {
     echo "+----------------------------------------------+"
     echo "|       Openpilot Repository                   |"
     echo "+----------------------------------------------+"
-    if [ -d /data/openpilot ]; then
-        cd /data/openpilot
+    if [ -d "/data/openpilot" ]; then
+        cd "/data/openpilot" || exit 1
         branch_name=$(git rev-parse --abbrev-ref HEAD)
         repo_url=$(git config --get remote.origin.url)
         echo "- Openpilot directory: ✅"
@@ -459,8 +488,8 @@ list_git_branches() {
     echo "+----------------------------------------------+"
     echo "|        Available Branches                    |"
     echo "+----------------------------------------------+"
-    if [ -d /data/openpilot ]; then
-        cd /data/openpilot
+    if [ -d "/data/openpilot" ]; then
+        cd "/data/openpilot" || return
         branches=$(git branch --all)
         if [ -n "$branches" ]; then
             echo "$branches"
@@ -480,11 +509,11 @@ list_git_branches() {
 # - Pulls changes into current branch
 fetch_pull_latest_changes() {
     echo "Fetching and pulling the latest changes for the current branch..."
-    if [ -d /data/openpilot ]; then
-        cd /data/openpilot
+    if [ -d "/data/openpilot" ]; then
+        cd "/data/openpilot" || return
         git fetch
         git pull
-        cd /data
+        cd - >/dev/null 2>&1
     else
         echo "No openpilot directory found."
     fi
@@ -496,12 +525,12 @@ fetch_pull_latest_changes() {
 # - Switches to specified branch
 change_branch() {
     echo "Changing the branch of the repository..."
-    if [ -d /data/openpilot ]; then
-        cd /data/openpilot
+    if [ -d "/data/openpilot" ]; then
+        cd "/data/openpilot" || return
         git fetch
         read -p "Enter the branch name: " branch_name
         git checkout "$branch_name"
-        cd /data
+        cd - >/dev/null 2>&1
     else
         echo "No openpilot directory found."
     fi
@@ -647,21 +676,24 @@ shutdown_device() {
 # Downloads latest version from GitHub
 update_script() {
     echo "Downloading the latest version of the script..."
-
+    
+    # Get absolute path of script
+    local script_path=$(get_absolute_path "$SCRIPT_DIR/CommaUtility.sh")
+    
     # Create backup of current script
-    cp /data/CommaUtility.sh /data/CommaUtility.sh.backup
+    cp "$script_path" "$script_path.backup"
 
-    if wget -O /data/CommaUtility.sh.tmp https://raw.githubusercontent.com/tonesto7/op-utilities/main/CommaUtility.sh; then
+    if wget -O "$script_path.tmp" https://raw.githubusercontent.com/tonesto7/op-utilities/main/CommaUtility.sh; then
         # If download successful, replace old script
-        mv /data/CommaUtility.sh.tmp /data/CommaUtility.sh
-        chmod +x /data/CommaUtility.sh
+        mv "$script_path.tmp" "$script_path"
+        chmod +x "$script_path"
         echo "Script updated successfully. Restarting the updated script."
         read -p "Press enter to continue..."
-        exec /data/CommaUtility.sh
+        exec "$script_path"
     else
         echo "Update failed. Restoring backup..."
-        mv /data/CommaUtility.sh.backup /data/CommaUtility.sh
-        rm -f /data/CommaUtility.sh.tmp
+        mv "$script_path.backup" "$script_path"
+        rm -f "$script_path.tmp"
         read -p "Press enter to continue..."
     fi
 }
@@ -889,6 +921,9 @@ update_main_gitignore() {
 }
 
 cleanup_files() {
+    local CURRENT_DIR=$(pwd)
+    ensure_directory "$BUILD_DIR" || return 1
+    
     find . \( -name '*.a' -o -name '*.o' -o -name '*.os' -o -name '*.pyc' -o -name 'moc_*' -o -name '*.cc' -o -name '__pycache__' -o -name '.DS_Store' \) -exec rm -rf {} +
     rm -rf .sconsign.dblite .venv .devcontainer .idea .mypy_cache .run .vscode
     rm -f .clang-tidy .env .gitmodules .gitattributes
@@ -900,16 +935,18 @@ cleanup_files() {
     rm -f tools/*.py tools/*.sh tools/*.md
     rm -f conftest.py SECURITY.md uv.lock
 
-    cleanup_directory "cereal" "*tests* *.md"
-    cleanup_directory "common" "*tests* *.md"
-    cleanup_directory "msgq_repo" "*tests* *.md .git*"
-    cleanup_directory "opendbc_repo" "*tests* *.md .git* LICENSE"
-    cleanup_directory "rednose_repo" "*tests* *.md .git* LICENSE"
-    cleanup_directory "selfdrive" "*.h *.md *test*"
-    cleanup_directory "system" "*tests* *.md"
-    cleanup_directory "third_party" "*Darwin* LICENSE README.md"
+    cleanup_directory "$BUILD_DIR/cereal" "*tests* *.md"
+    cleanup_directory "$BUILD_DIR/common" "*tests* *.md"
+    cleanup_directory "$BUILD_DIR/msgq_repo" "*tests* *.md .git*"
+    cleanup_directory "$BUILD_DIR/opendbc_repo" "*tests* *.md .git* LICENSE"
+    cleanup_directory "$BUILD_DIR/rednose_repo" "*tests* *.md .git* LICENSE"
+    cleanup_directory "$BUILD_DIR/selfdrive" "*.h *.md *test*"
+    cleanup_directory "$BUILD_DIR/system" "*tests* *.md"
+    cleanup_directory "$BUILD_DIR/third_party" "*Darwin* LICENSE README.md"
 
     cleanup_tinygrad_repo
+    
+    cd "$CURRENT_DIR" || return 1
 }
 
 cleanup_directory() {
@@ -980,15 +1017,18 @@ build_cross_repo_branch() {
     local GIT_REPO_ORIGIN="$4"
     local GIT_PUBLIC_REPO_ORIGIN="$5"
 
+    # Use absolute paths and save current directory
+    local CURRENT_DIR=$(pwd)
+    
     rm -rf "$BUILD_DIR" "$TMP_DIR"
     git clone --single-branch --branch "$BUILD_BRANCH" "$GIT_PUBLIC_REPO_ORIGIN" "$BUILD_DIR"
-    cd "$BUILD_DIR"
+    cd "$BUILD_DIR" || exit 1
     find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
     git clone --depth 1 "$GIT_REPO_ORIGIN" -b "$CLONE_BRANCH" "$TMP_DIR"
-    cd "$TMP_DIR"
+    cd "$TMP_DIR" || exit 1
     git submodule update --init --recursive
     process_submodules "$TMP_DIR"
-    cd "$BUILD_DIR"
+    cd "$BUILD_DIR" || exit 1
     rsync -a --exclude='.git' "$TMP_DIR/" "$BUILD_DIR/"
     rm -rf "$TMP_DIR"
     setup_git_env_bp
@@ -999,6 +1039,9 @@ build_cross_repo_branch() {
     cleanup_files
     create_prebuilt_marker
     prepare_commit_push "$COMMIT_DESC_HEADER" "$GIT_PUBLIC_REPO_ORIGIN" "$BUILD_BRANCH"
+    
+    # Return to original directory
+    cd "$CURRENT_DIR" || exit 1
 }
 
 build_repo_branch() {
@@ -1007,9 +1050,12 @@ build_repo_branch() {
     local COMMIT_DESC_HEADER="$3"
     local GIT_REPO_ORIGIN="$4"
 
+    # Use absolute paths and save current directory
+    local CURRENT_DIR=$(pwd)
+    
     rm -rf "$BUILD_DIR" "$TMP_DIR"
     git clone "$GIT_REPO_ORIGIN" -b "$CLONE_BRANCH" "$BUILD_DIR"
-    cd "$BUILD_DIR"
+    cd "$BUILD_DIR" || exit 1
     git submodule update --init --recursive
     setup_git_env_bp
     build_openpilot_bp
@@ -1020,6 +1066,9 @@ build_repo_branch() {
     cleanup_files
     create_prebuilt_marker
     prepare_commit_push "$COMMIT_DESC_HEADER" "$GIT_REPO_ORIGIN" "$BUILD_BRANCH"
+    
+    # Return to original directory
+    cd "$CURRENT_DIR" || exit 1
 }
 
 clone_repo_bp() {
@@ -1029,7 +1078,10 @@ clone_repo_bp() {
     local build="$4"
     local skip_reboot="${5:-no}"
 
-    cd /data || exit 1
+    # Save current directory
+    local CURRENT_DIR=$(pwd)
+    
+    cd "/data" || exit 1
     rm -rf openpilot
     if [[ "$branch" != *-build* ]]; then
         git clone --depth 1 "${repo_url}" -b "${branch}" openpilot || exit 1
@@ -1041,16 +1093,18 @@ clone_repo_bp() {
         git submodule update --init --recursive
     fi
 
-    # cd openpilot || exit 1
-
     if [ "$build" == "yes" ]; then
         scons -j"$(nproc)" || exit 1
     fi
 
-    if [ "$skip_reboot" != "yes" ]; then
+    # Return to original directory if not rebooting
+    if [ "$skip_reboot" == "yes" ]; then
+        cd "$CURRENT_DIR" || exit 1
+    else
         reboot_device
     fi
 }
+
 
 clone_public_bluepilot() {
     clone_repo_bp "the public BluePilot" "$GIT_BP_PUBLIC_REPO" "staging-DONOTUSE" "no"
@@ -1173,12 +1227,13 @@ clone_custom_repo() {
 
     clone_repo_bp "repository '$REPO' with branch '$CLONE_BRANCH'" "$GIT_REPO_URL" "$CLONE_BRANCH" "no" "yes"
 
+    # Use absolute path for openpilot directory check
     if [ ! -f "/data/openpilot/prebuilt" ]; then
         echo "[-] No prebuilt marker found. Might need to compile."
         read -p "Compile now? (y/N): " compile_confirm
         if [[ "$compile_confirm" =~ ^[Yy]$ ]]; then
             echo "[-] Running scons..."
-            cd /data/openpilot
+            cd "/data/openpilot" || exit 1
             scons -j"$(nproc)" || {
                 echo "[-] SCons failed."
                 exit 1
