@@ -2265,6 +2265,131 @@ detect_issues() {
 }
 
 ###############################################################################
+# System Statistics Menu
+###############################################################################
+
+###############################################################################
+# System Statistics Functions
+###############################################################################
+
+get_cpu_stats() {
+    # Get CPU usage and top process
+    local cpu_usage
+    local top_process
+
+    # Get overall CPU usage from 'top' (first cpu line, second field)
+    cpu_usage=$(top -bn1 | awk '/^%Cpu/{print $2}')
+
+    # Get top process by CPU
+    top_process=$(ps -eo cmd,%cpu --sort=-%cpu | head -2 | tail -1 | awk '{print $1 " (" $2 "%)"}')
+
+    echo "CPU Usage: ${cpu_usage}% | Top: ${top_process}"
+}
+
+get_memory_stats() {
+    # Get memory usage
+    local total
+    local used
+    local percentage
+
+    total=$(free -m | awk 'NR==2 {print $2}')
+    used=$(free -m | awk 'NR==2 {print $3}')
+    percentage=$(free | awk 'NR==2 {printf "%.1f", $3*100/$2}')
+
+    echo "Memory: ${used}MB/${total}MB (${percentage}%)"
+}
+
+get_cellular_stats() {
+    # Get cellular information using mmcli if ModemManager is available
+    if command -v mmcli >/dev/null 2>&1; then
+        local modem_index
+        local carrier
+        local signal
+        local roaming
+        local tech
+
+        # Get the first modem index
+        modem_index=$(mmcli -L | grep -o '[0-9]*' | head -1)
+
+        if [ -n "$modem_index" ]; then
+            # Get carrier name
+            carrier=$(mmcli -m "$modem_index" | grep "operator name" | awk -F': ' '{print $2}')
+
+            # Get signal strength
+            signal=$(mmcli -m "$modem_index" | grep "signal quality" | awk -F': ' '{print $2}' | awk '{print $1}')
+
+            # Get network tech
+            tech=$(mmcli -m "$modem_index" | grep "access tech" | awk -F': ' '{print $2}')
+
+            # Get roaming status
+            roaming=$(mmcli -m "$modem_index" | grep "state" | grep -i "roaming" >/dev/null && echo "Roaming" || echo "Home")
+
+            echo "${carrier:-Unknown} | ${tech:-Unknown} | Signal: ${signal:-0}% | ${roaming}"
+        else
+            echo "No modem detected"
+        fi
+    else
+        echo "ModemManager not available"
+    fi
+}
+
+system_statistics_menu() {
+    while true; do
+        clear
+        echo "+----------------------------------------------+"
+        echo "|           System Statistics                  |"
+        echo "+----------------------------------------------+"
+
+        echo "CPU Usage:"
+        echo "├─ $(get_cpu_stats)"
+        echo "├─ Top Processes by CPU:"
+        ps -eo cmd,%cpu --sort=-%cpu | head -4 | tail -3 |
+            awk '{printf "│  %-40s %5.1f%%\n", substr($1,1,40), $NF}'
+        echo ""
+
+        echo "Memory Usage:"
+        echo "├─ $(get_memory_stats)"
+        echo "├─ Memory Details:"
+        free -h | awk 'NR==2{printf "│  %-8s %8s %8s %8s %8s\n", "", "total", "used", "free", "cache"}'
+        free -h | awk 'NR==2{printf "│  %-8s %8s %8s %8s %8s\n", "Mem:", $2, $3, $4, $6}'
+        free -h | awk 'NR==3{printf "│  %-8s %8s %8s %8s\n", "Swap:", $2, $3, $4}'
+        echo ""
+
+        echo "Cellular Connection:"
+        echo "├─ $(get_cellular_stats)"
+        if command -v mmcli >/dev/null 2>&1; then
+            local modem_index
+            modem_index=$(mmcli -L | grep -o '[0-9]*' | head -1)
+            if [ -n "$modem_index" ]; then
+                echo "├─ Additional Details:"
+                mmcli -m "$modem_index" | grep -E "operator name|signal quality|state|access tech|power state|packet service state" |
+                    sed 's/^/│  /' | sed 's/|//'
+            fi
+        fi
+        echo ""
+
+        echo "Disk Usage:"
+        echo "├─ Filesystem Details:"
+        df -h | grep -E '^/dev|Filesystem' |
+            awk '{printf "│  %-15s %8s %8s %8s %8s\n", substr($1,length($1)>15?length($1)-15:0), $2, $3, $4, $5}'
+        echo ""
+
+        echo "+----------------------------------------------+"
+        echo "R. Refresh Statistics"
+        echo "Q. Back to Main Menu"
+
+        read -t 30 -p "Enter your choice (auto-refresh in 30s): " stats_choice
+
+        case $stats_choice in
+        [rR]) continue ;;
+        [qQ]) break ;;
+        "") continue ;; # Timeout occurred, refresh
+        *) print_error "Invalid choice." ;;
+        esac
+    done
+}
+
+###############################################################################
 # Main Menu & Argument Handling
 ###############################################################################
 
@@ -2333,9 +2458,10 @@ display_main_menu() {
     echo "2. Repository & Build Tools"
     echo "3. View Logs"
     echo "4. View Recent Error"
+    echo "5. System Statistics"
 
     # Dynamic fix options
-    local fix_number=5 # Start from 5 because we already have 4 options
+    local fix_number=6 # Start from 6 because we already have 5 options
     for i in "${!ISSUE_FIXES[@]}"; do
         local color=""
         case "${ISSUE_PRIORITIES[$i]}" in
@@ -2361,10 +2487,10 @@ handle_main_menu_input() {
     2) repo_build_and_management_menu ;;
     3) display_logs ;;
     4) view_error_log ;;
-
-    [5-9] | [1-9][0-9])
+    5) system_statistics_menu ;;
+    [6-9] | [1-9][0-9])
         # Calculate array index by adjusting for the 4 standard menu items
-        local fix_index=$((main_choice - 4))
+        local fix_index=$((main_choice - 5))
         if [ -n "${ISSUE_FIXES[$fix_index]}" ]; then
             ${ISSUE_FIXES[$fix_index]}
         else
