@@ -1,10 +1,106 @@
 #!/bin/bash
 
 ###############################################################################
-# Global Variables (from both scripts)
+# CommaUtility Script
+#
+# Description:
+# - This script is designed to help manage and maintain the comma device and
+#   it's Openpilot software.
+# - It provides a menu-driven interface for various tasks related to the comma
+#   utility.
+#
 ###############################################################################
-SCRIPT_VERSION="2.0.6"
-SCRIPT_MODIFIED="2024-12-20"
+
+###############################################################################
+# Global Variables
+###############################################################################
+readonly SCRIPT_VERSION="2.1.0"
+readonly SCRIPT_MODIFIED="2025-01-13"
+
+# We unify color-coded messages in a single block for consistency:
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m'
+readonly NC='\033[0m' # No Color
+
+# Helper functions for colored output
+print_success() {
+    echo -e "${GREEN}$1${NC}"
+}
+print_error() {
+    echo -e "${RED}$1${NC}"
+}
+print_warning() {
+    echo -e "${YELLOW}$1${NC}"
+}
+print_blue() {
+    echo -e "${BLUE}$1${NC}"
+}
+print_info() {
+    echo -e "$1"
+}
+
+###############################################################################
+# Network Helper Functions
+###############################################################################
+check_network_connectivity() {
+    local host="${1:-github.com}"
+    local timeout="${2:-5}"
+    local retry_count="${3:-3}"
+    local retry_delay="${4:-2}"
+
+    for ((i = 1; i <= retry_count; i++)); do
+        if ping -c 1 -W "$timeout" "$host" >/dev/null 2>&1; then
+            return 0
+        fi
+
+        if [ $i -lt $retry_count ]; then
+            print_warning "Network check attempt $i failed. Retrying in $retry_delay seconds..."
+            sleep "$retry_delay"
+        fi
+    done
+
+    return 1
+}
+
+execute_with_network_retry() {
+    local cmd="$1"
+    local error_msg="${2:-Network operation failed}"
+    local retry_count="${3:-3}"
+    local retry_delay="${4:-5}"
+    local attempt=1
+
+    while [ $attempt -le $retry_count ]; do
+        if ! check_network_connectivity; then
+            print_warning "No network connectivity. Checking again in $retry_delay seconds..."
+            sleep "$retry_delay"
+            attempt=$((attempt + 1))
+            continue
+        fi
+
+        if eval "$cmd"; then
+            return 0
+        fi
+
+        print_warning "Attempt $attempt of $retry_count failed. Retrying in $retry_delay seconds..."
+        sleep "$retry_delay"
+        attempt=$((attempt + 1))
+    done
+
+    print_error "$error_msg after $retry_count attempts"
+    return 1
+}
+
+# A convenient prompt-pause function to unify "Press Enter" prompts:
+pause_for_user() {
+    read -p "Press enter to continue..."
+}
+
+# Array-based detection data
+declare -A ISSUE_FIXES
+declare -A ISSUE_DESCRIPTIONS
+declare -A ISSUE_PRIORITIES # 1=Critical, 2=Warning, 3=Recommendation
 
 ssh_status=()
 
@@ -14,39 +110,229 @@ REPO=""
 CLONE_BRANCH=""
 BUILD_BRANCH=""
 
-OS=$(uname)
-GIT_BP_PUBLIC_REPO="git@github.com:BluePilotDev/bluepilot.git"
-GIT_BP_PRIVATE_REPO="git@github.com:ford-op/sp-dev-c3.git"
-GIT_SP_REPO="git@github.com:sunnypilot/sunnypilot.git"
+# OS checks and directories
+readonly OS=$(uname)
+readonly GIT_BP_PUBLIC_REPO="git@github.com:BluePilotDev/bluepilot.git"
+readonly GIT_BP_PRIVATE_REPO="git@github.com:ford-op/sp-dev-c3.git"
+readonly GIT_OP_PRIVATE_FORD_REPO="git@github.com:ford-op/openpilot.git"
+readonly GIT_SP_REPO="git@github.com:sunnypilot/sunnypilot.git"
+readonly GIT_COMMA_REPO="git@github.com:commaai/openpilot.git"
 
 if [ "$OS" = "Darwin" ]; then
-    BUILD_DIR="$HOME/Documents/bluepilot-utility/bp-build"
-    SCRIPT_DIR=$(dirname "$0")
+    readonly BUILD_DIR="$HOME/Documents/bluepilot-utility/bp-build"
+    readonly SCRIPT_DIR=$(dirname "$0")
 else
-    BUILD_DIR="/data/openpilot"
+    readonly BUILD_DIR="/data/openpilot"
     # Get absolute path of script regardless of where it's called from
-    SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd || echo "/data")
+    readonly SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd || echo "/data")
     if [ "$SCRIPT_DIR" = "" ]; then
-        echo "Error: Could not determine script directory"
+        print_error "Error: Could not determine script directory"
         exit 1
     fi
 fi
 
-TMP_DIR="${BUILD_DIR}-build-tmp"
+readonly TMP_DIR="${BUILD_DIR}-build-tmp"
 
+# Check file permissions and owner
+# Returns:
+# - 0: Match
+# - 1: Mismatch
+# - 2: File missing
+check_file_permissions_owner() {
+    local file_path="$1"
+    local expected_permissions="$2"
+    local expected_owner="$3"
+
+    if [ ! -f "$file_path" ]; then
+        # Return 2 for "file missing"
+        return 2
+    fi
+
+    local actual_permissions
+    local actual_owner
+    local actual_group
+
+    actual_permissions=$(stat -c "%A" "$file_path" 2>/dev/null)
+    actual_owner=$(stat -c "%U" "$file_path" 2>/dev/null)
+    actual_group=$(stat -c "%G" "$file_path" 2>/dev/null)
+
+    if [ "$actual_permissions" != "$expected_permissions" ] ||
+        [ "$actual_owner" != "$expected_owner" ] ||
+        [ "$actual_group" != "$expected_owner" ]; then
+        # Return 1 for mismatch
+        return 1
+    fi
+
+    return 0
+}
+
+# Create a backup of all SSH files
+# Returns:
+# - 0: Success
+# - 1: Failure
+backup_ssh() {
+    # clear
+    print_info "Backing up SSH files..."
+    if [ -f "/home/comma/.ssh/github" ] &&
+        [ -f "/home/comma/.ssh/github.pub" ] &&
+        [ -f "/home/comma/.ssh/config" ]; then
+        mkdir -p "/data/ssh_backup"
+        cp "/home/comma/.ssh/github" "/data/ssh_backup/"
+        cp "/home/comma/.ssh/github.pub" "/data/ssh_backup/"
+        cp "/home/comma/.ssh/config" "/data/ssh_backup/"
+        sudo chown comma:comma "/data/ssh_backup" -R
+        sudo chmod 600 "/data/ssh_backup/github"
+        save_backup_metadata
+        print_success "SSH files backed up successfully to /data/ssh_backup/"
+    else
+        print_warning "No valid SSH files found to backup."
+    fi
+    pause_for_user
+}
+
+# Restore SSH files from backup with verification
+restore_ssh() {
+    # clear
+    print_info "Restoring SSH files..."
+    if check_ssh_backup; then
+        if ! verify_backup_integrity; then
+            print_error "Backup files appear to be corrupted"
+            pause_for_user
+            return 1
+        fi
+
+        print_info "Found backup with the following information:"
+        get_backup_metadata
+        read -p "Do you want to proceed with restore? (y/N): " confirm
+        if [[ $confirm =~ ^[Yy]$ ]]; then
+            # Always clean both locations before restore
+            remove_ssh_contents
+
+            # Restore to home directory
+            mkdir -p /home/comma/.ssh
+            cp /data/ssh_backup/github /home/comma/.ssh/
+            cp /data/ssh_backup/github.pub /home/comma/.ssh/
+            cp /data/ssh_backup/config /home/comma/.ssh/
+            sudo chown comma:comma /home/comma/.ssh -R
+            sudo chmod 600 /home/comma/.ssh/github
+
+            # Ensure persistent storage is updated
+            copy_ssh_config_and_keys
+            print_success "SSH files restored successfully."
+        else
+            print_info "Restore cancelled."
+        fi
+    else
+        print_warning "No valid SSH backup found to restore."
+    fi
+    pause_for_user
+}
+
+# Check disk usage and resize root if needed
+# Returns:
+# - 0: Success
+# - 1: Failure
+check_disk_usage_and_resize() {
+    # This function unifies the disk usage check from detect_issues() and
+    # check_root_space() to avoid code duplication.
+    local partition="/"
+    local root_usage=$(df -h "$partition" | awk 'NR==2 {gsub("%","",$5); print $5}')
+    # Return usage for other logic as needed
+    echo "$root_usage"
+}
+
+# Resize root filesystem if needed
+# Returns:
+# - 0: Success
+# - 1: Failure
+resize_root_if_needed() {
+    local usage="$1"
+    if [ "$usage" -ge 100 ]; then
+        print_warning "Root filesystem is full ($usage%)."
+        print_info "To fix this, do you want to resize the root filesystem?"
+        read -p "Enter y or n: " root_space_choice
+        if [ "$root_space_choice" = "y" ]; then
+            sudo mount -o remount,rw /
+            sudo resize2fs "$(findmnt -n -o SOURCE /)"
+            print_success "Root filesystem resized successfully."
+        fi
+    fi
+}
+
+###############################################################################
+# Git Operations
+###############################################################################
+
+# Clone and initialize a git repository
+# Returns:
+# - 0: Success
+# - 1: Failure
+git_clone_and_init() {
+    local repo_url="$1"
+    local branch="$2"
+    local dest_dir="$3"
+
+    if ! check_network_connectivity "github.com"; then
+        print_error "No network connectivity to GitHub. Cannot proceed with clone operation."
+        return 1
+    fi
+
+    local clone_cmd="git clone --depth 1 -b '$branch' '$repo_url' '$dest_dir'"
+    if ! execute_with_network_retry "$clone_cmd" "Failed to clone repository"; then
+        return 1
+    fi
+
+    cd "$dest_dir" || return 1
+
+    local submodule_cmd="git submodule update --init --recursive"
+    execute_with_network_retry "$submodule_cmd" "Failed to update submodules"
+}
+
+git_operation_with_timeout() {
+    local cmd="$1"
+    local timeout="$2"
+    timeout "$timeout" $cmd || {
+        print_error "Operation timed out after ${timeout} seconds"
+        return 1
+    }
+}
+
+# Check if the working directory is clean
+# Returns:
+# - 0: Clean
+# - 1: Not clean
+check_working_directory() {
+    if [ -n "$(git status --porcelain)" ]; then
+        print_error "Working directory is not clean"
+        return 1
+    fi
+    return 0
+}
+
+###############################################################################
+# Directory and Path Functions
+###############################################################################
+
+# Ensure the current directory is the target directory
+# Returns:
+# - 0: Success
+# - 1: Failure
 ensure_directory() {
     local target_dir="$1"
-    local current_dir=$(pwd)
+    local current_dir
+    current_dir=$(pwd)
     if [ "$current_dir" != "$target_dir" ]; then
         cd "$target_dir" || {
-            echo "Error: Could not change to directory: $target_dir"
+            print_error "Could not change to directory: $target_dir"
             return 1
         }
         return 0
     fi
 }
 
-# Ensures we're working with absolute paths
+# Get the absolute path of a given path
+# Returns:
+# - Absolute path
 get_absolute_path() {
     local path="$1"
     if [[ "$path" = /* ]]; then
@@ -57,145 +343,98 @@ get_absolute_path() {
 }
 
 ###############################################################################
-# SSH Status Functions
+# SSH Status & Management Functions
 ###############################################################################
 
-# Displays a condensed single-line SSH status for the main menu
-# Shows if SSH exists and if any repairs are needed
+# Function to display mini SSH status
+# Returns:
+# - 0: Success
+# - 1: Failure
 display_ssh_status_short() {
-    # Shortened SSH status for main menu
-    expected_owner="comma"
-    expected_permissions="-rw-------"
-
-    ssh_exists=false
-    ssh_fix_needed=false
-
-    if [ -f /home/comma/.ssh/github ]; then
-        ssh_exists=true
-        actual_permissions=$(stat -c "%A" /home/comma/.ssh/github 2>/dev/null)
-        actual_owner=$(stat -c "%U" /home/comma/.ssh/github 2>/dev/null)
-        actual_group=$(stat -c "%G" /home/comma/.ssh/github 2>/dev/null)
-
-        if [ "$actual_permissions" != "$expected_permissions" ]; then
-            ssh_fix_needed=true
+    print_info "| SSH Status:"
+    if [ -f "/home/comma/.ssh/github" ]; then
+        echo "| └─ Key: Found"
+        if [ -f "/data/ssh_backup/metadata.txt" ]; then
+            local last_backup
+            last_backup=$(grep "Backup Date:" /data/ssh_backup/metadata.txt | cut -d: -f2- | xargs)
+            echo "| └─ Backup: Last Backup $last_backup"
         fi
-        if [ "$actual_owner" != "comma" ] || [ "$actual_group" != "comma" ]; then
-            ssh_fix_needed=true
-        fi
-    fi
-
-    # Show a single line summary
-    if $ssh_exists; then
-        if $ssh_fix_needed; then
-            echo "| SSH Status: ❌ Exists (Needs Repair)"
-        else
-            echo "| SSH Status: ✅"
-        fi
-    else
-        echo "| SSH Status: ❌ (Missing)"
     fi
 }
 
-# Displays detailed SSH status information including:
-# - SSH key presence in ~/.ssh/ and /usr/default/home/comma/.ssh/
-# - File permissions and ownership
-# - Backup status and metadata
+# Display detailed SSH status
+# Returns:
+# - 0: Success
+# - 1: Failure
 display_ssh_status() {
     echo "+----------------------------------------------+"
     echo "|          SSH Status                          |"
     echo "+----------------------------------------------+"
 
-    # Define the expected owner and permissions
-    expected_owner="comma"
-    expected_permissions="-rw-------"
+    local expected_owner="comma"
+    local expected_permissions="-rw-------"
     ssh_status=()
 
-    # Check for SSH key in ~/.ssh/
-    if [ -f /home/comma/.ssh/github ]; then
-        actual_permissions=$(ls -l /home/comma/.ssh/github | awk '{ print $1 }')
-        actual_owner=$(ls -l /home/comma/.ssh/github | awk '{ print $3 }')
-        actual_group=$(ls -l /home/comma/.ssh/github | awk '{ print $4 }')
+    # Backup age check
+    local backup_date
+    local backup_age
+    local backup_days
 
-        echo "- SSH key in ~/.ssh/: ✅"
-        ssh_status+=("exists")
+    if [ -f "/data/ssh_backup/metadata.txt" ]; then
+        backup_date=$(grep "Backup Date:" /data/ssh_backup/metadata.txt | cut -d: -f2- | xargs)
+        backup_age=$(($(date +%s) - $(date -d "$backup_date" +%s)))
+        backup_days=$((backup_age / 86400))
+    fi
 
-        # Check permissions
-        if [ "$actual_permissions" == "$expected_permissions" ]; then
-            echo "- Permissions: ✅ ($actual_permissions)"
-        else
-            echo "- Permissions: ❌ (Expected: $expected_permissions, Actual: $actual_permissions)"
-            ssh_status+=("fix_permissions")
+    # Check main key
+    check_file_permissions_owner "/home/comma/.ssh/github" "$expected_permissions" "$expected_owner"
+    local ssh_check_result=$?
+
+    if [ "$ssh_check_result" -eq 0 ]; then
+        echo -e "${NC}|${GREEN} SSH key in ~/.ssh/: ✅${NC}"
+        local fingerprint
+        fingerprint=$(ssh-keygen -lf /home/comma/.ssh/github 2>/dev/null | awk '{print $2}')
+        if [ -n "$fingerprint" ]; then
+            echo -e "|  └─ Fingerprint: $fingerprint"
         fi
-
-        # Check owner
-        if [ "$actual_owner" == "$expected_owner" ] && [ "$actual_group" == "$expected_owner" ]; then
-            echo "- Owner: ✅ ($actual_owner:$actual_group)"
-        else
-            echo "- Owner: ❌ (Expected: $expected_owner:$expected_owner, Actual: $actual_owner:$actual_group)"
-            ssh_status+=("fix_owner")
-        fi
+    elif [ "$ssh_check_result" -eq 1 ]; then
+        echo -e "${NC}|${RED} SSH key in ~/.ssh/: ❌ (permissions/ownership mismatch)${NC}"
+        ssh_status+=("fix_permissions")
     else
-        echo "- SSH key in ~/.ssh/: ❌"
+        echo -e "${NC}|${RED} SSH key in ~/.ssh/: ❌ (missing)${NC}"
         ssh_status+=("missing")
     fi
 
-    # Check for SSH key in /usr/default/home/comma/.ssh/
-    if [ -f /usr/default/home/comma/.ssh/github ]; then
-        actual_permissions=$(ls -l /usr/default/home/comma/.ssh/github | awk '{ print $1 }')
-        actual_owner=$(ls -l /usr/default/home/comma/.ssh/github | awk '{ print $3 }')
-        actual_group=$(ls -l /usr/default/home/comma/.ssh/github | awk '{ print $4 }')
-
-        echo "- SSH key in /usr/default/home/comma/.ssh/: ✅"
-
-        # Check permissions
-        if [ "$actual_permissions" == "$expected_permissions" ]; then
-            echo "- Permissions: ✅ ($actual_permissions)"
-        else
-            echo "- Permissions: ❌ (Expected: $expected_permissions, Actual: $actual_permissions)"
-            ssh_status+=("fix_permissions_usr")
-        fi
-
-        # Check owner
-        if [ "$actual_owner" == "$expected_owner" ] && [ "$actual_group" == "$expected_owner" ]; then
-            echo "- Owner: ✅ ($actual_owner:$actual_group)"
-        else
-            echo "- Owner: ❌ (Expected: $expected_owner:$expected_owner, Actual: $actual_owner:$actual_group)"
-            ssh_status+=("fix_owner_usr")
-        fi
-    else
-        echo "- SSH key in /usr/default/home/comma/.ssh/: ❌"
-        ssh_status+=("missing_usr")
-    fi
-
-    # Check SSH backup status (no fingerprint displayed)
-    if [ -f "/data/ssh_backup/github" ] && [ -f "/data/ssh_backup/github.pub" ] && [ -f "/data/ssh_backup/config" ]; then
-        echo "- SSH Backup Status: ✅"
+    # Backup status
+    if [ -f "/data/ssh_backup/github" ] &&
+        [ -f "/data/ssh_backup/github.pub" ] &&
+        [ -f "/data/ssh_backup/config" ]; then
+        echo -e "${NC}|${GREEN} SSH Backup Status: ✅${NC}"
         if [ -f "/data/ssh_backup/metadata.txt" ]; then
-            backup_date=$(grep "Backup Date:" /data/ssh_backup/metadata.txt | cut -d: -f2- | xargs)
-            echo "  └─ Last Backup: $backup_date"
+            echo -e "|  └─ Last Backup: $backup_date"
+            if [ "$backup_days" -gt 30 ]; then
+                echo -e "${NC}|${YELLOW}  └─ Warning: Backup is $backup_days days old${NC}"
+            fi
             if [ -f "/home/comma/.ssh/github" ]; then
                 if diff -q "/home/comma/.ssh/github" "/data/ssh_backup/github" >/dev/null; then
-                    echo "  └─ Backup is current with active SSH files"
+                    echo -e "|  └─ Backup is current with active SSH files"
                 else
-                    echo "  └─ Backup differs from active SSH files"
+                    echo -e "${NC}|${YELLOW}  └─ Backup differs from active SSH files${NC}"
                 fi
             fi
         else
-            echo "  └─ Backup metadata not found"
+            echo -e "${NC}|${YELLOW}  └─ Backup metadata not found${NC}"
         fi
     else
-        echo "- SSH Backup Status: ❌"
+        echo -e "${NC}|${RED} SSH Backup Status: ❌${NC}"
         ssh_status+=("no_backup")
     fi
-
-    echo "+----------------------------------------------+"
 }
 
-# Creates the SSH config file in ~/.ssh/ with GitHub configuration
-# Sets up the IdentityFile path and enables AddKeysToAgent
+# Create SSH config file
 create_ssh_config() {
     mkdir -p /home/comma/.ssh
-    echo "Creating SSH config file..."
+    print_info "Creating SSH config file..."
     cat >/home/comma/.ssh/config <<EOF
 Host github.com
   AddKeysToAgent yes
@@ -206,37 +445,50 @@ Host github.com
 EOF
 }
 
-# Verifies if a valid SSH backup exists
-# Returns:
-# - 0 if backup exists with all required files
-# - 1 if backup is missing or incomplete
 check_ssh_backup() {
-    if [ -f "/data/ssh_backup/github" ] && [ -f "/data/ssh_backup/github.pub" ] && [ -f "/data/ssh_backup/config" ]; then
-        return 0 # Valid backup exists
+    # Return 0 if valid backup found, else 1
+    if [ -f "/data/ssh_backup/github" ] &&
+        [ -f "/data/ssh_backup/github.pub" ] &&
+        [ -f "/data/ssh_backup/config" ]; then
+        return 0
     else
-        return 1 # No valid backup
+        return 1
     fi
 }
 
-# Function to check SSH config completeness
+ssh_operation_with_timeout() {
+    local cmd="$1"
+    local timeout="$2"
+    timeout "$timeout" $cmd || {
+        print_error "SSH operation timed out after ${timeout} seconds"
+        return 1
+    }
+}
+
+verify_backup_integrity() {
+    local backup_dir="/data/ssh_backup"
+    for file in "github" "github.pub" "config"; do
+        if [ ! -f "$backup_dir/$file" ] || [ ! -s "$backup_dir/$file" ]; then
+            return 1
+        fi
+    done
+    return 0
+}
+
 check_ssh_config_completeness() {
     local config_file="/home/comma/.ssh/config"
-    local missing_keys=()
-
-    # Check if config file exists
     if [ ! -f "$config_file" ]; then
         echo "SSH config file is missing."
         return 1
     fi
 
-    # Check for specific keys
+    local missing_keys=()
     grep -q "AddKeysToAgent yes" "$config_file" || missing_keys+=("AddKeysToAgent")
     grep -q "IdentityFile /home/comma/.ssh/github" "$config_file" || missing_keys+=("IdentityFile")
     grep -q "Hostname ssh.github.com" "$config_file" || missing_keys+=("Hostname")
     grep -q "Port 443" "$config_file" || missing_keys+=("Port")
     grep -q "User git" "$config_file" || missing_keys+=("User")
 
-    # If missing keys, return false
     if [ ${#missing_keys[@]} -gt 0 ]; then
         echo "Missing SSH config keys: ${missing_keys[*]}"
         return 1
@@ -245,165 +497,165 @@ check_ssh_config_completeness() {
     return 0
 }
 
-# Function to update github SSH config to port 443
 change_github_ssh_port() {
-    echo "Updating github SSH config to use port 443..."
-    create_ssh_config  # Recreate config with port 443
+    clear
+    print_info "Updating github SSH config to use port 443..."
+    create_ssh_config
     copy_ssh_config_and_keys
-    backup_ssh_files
-    echo "github SSH config updated successfully."
-    read -p "Press enter to continue..."
+    backup_ssh
+    print_success "github SSH config updated successfully."
+    pause_for_user
 }
 
+test_ssh_connection() {
+    clear
+    print_info "Testing SSH connection to GitHub..."
 
-###############################################################################
-# SSH Management Functions
-###############################################################################
-
-# Creates a backup of all SSH files to /data/ssh_backup/
-# Includes: SSH keys, config, and metadata
-# Preserves permissions and ownership
-backup_ssh_files() {
-    echo "Backing up SSH files..."
-    if [ -f "/home/comma/.ssh/github" ] && [ -f "/home/comma/.ssh/github.pub" ] && [ -f "/home/comma/.ssh/config" ]; then
-        mkdir -p "/data/ssh_backup"
-        cp "/home/comma/.ssh/github" "/data/ssh_backup/"
-        cp "/home/comma/.ssh/github.pub" "/data/ssh_backup/"
-        cp "/home/comma/.ssh/config" "/data/ssh_backup/"
-        sudo chown comma:comma "/data/ssh_backup" -R
-        sudo chmod 600 "/data/ssh_backup/github"
-        save_backup_metadata
-        echo "SSH files backed up successfully to /data/ssh_backup/"
-    else
-        echo "No valid SSH files found to backup"
+    if ! check_network_connectivity "github.com"; then
+        print_error "No network connectivity to GitHub. Cannot test SSH connection."
+        pause_for_user
+        return 1
     fi
-    read -p "Press enter to continue..."
-}
 
+    # Use timeout to prevent hanging
+    if ! result=$(timeout 10 ssh -T git@github.com 2>&1); then
+        connection_status=$?
+        if [ $connection_status -eq 124 ]; then
+            print_error "SSH connection test timed out"
+            pause_for_user
+            return 1
+        fi
+    fi
 
-# Restores SSH files from backup with verification
-# - Verifies backup exists and is valid
-# - Prompts for confirmation before restore
-# - Maintains proper permissions and ownership
-restore_ssh_files() {
-    echo "Restoring SSH files..."
-    if check_ssh_backup; then
-        echo "Found backup with the following information:"
-        get_backup_metadata
-        read -p "Do you want to proceed with restore? (y/N): " confirm
-        if [[ $confirm =~ ^[Yy]$ ]]; then
-            remove_ssh_contents
-            mkdir -p /home/comma/.ssh
-            cp /data/ssh_backup/* /home/comma/.ssh/
-            rm -f /home/comma/.ssh/metadata.txt
-            sudo chown comma:comma /home/comma/.ssh -R
-            sudo chmod 600 /home/comma/.ssh/github
-            copy_ssh_config_and_keys
-            echo "SSH files restored successfully"
+    if echo "$result" | grep -q "You've successfully authenticated"; then
+        print_success "SSH connection test successful."
+
+        # Update metadata file with test date
+        local test_date
+        test_date=$(date '+%Y-%m-%d %H:%M:%S')
+
+        if [ -f "/data/ssh_backup/metadata.txt" ]; then
+            # Check if Last SSH Test line exists
+            if grep -q "Last SSH Test:" "/data/ssh_backup/metadata.txt"; then
+                # Update existing line
+                sed -i "s/Last SSH Test:.*/Last SSH Test: $test_date/" "/data/ssh_backup/metadata.txt"
+            else
+                # Append new line if it doesn't exist
+                echo "Last SSH Test: $test_date" >>"/data/ssh_backup/metadata.txt"
+            fi
         else
-            echo "Restore cancelled"
+            # Create new metadata file if it doesn't exist
+            mkdir -p "/data/ssh_backup"
+            cat >"/data/ssh_backup/metadata.txt" <<EOF
+Backup Date: Not backed up
+Last SSH Test: $test_date
+EOF
         fi
     else
-        echo "No valid SSH backup found to restore"
+        print_error "SSH connection test failed."
+        print_error "Error: $result"
     fi
-    read -p "Press enter to continue..."
+    pause_for_user
 }
 
-# Creates metadata file for SSH backup
-# Records:
-# - Backup timestamp
-save_backup_metadata() {
-    local backup_time=$(date '+%Y-%m-%d %H:%M:%S')
-    cat >/data/ssh_backup/metadata.txt <<EOF
-Backup Date: $backup_time
-EOF
-}
-
-# Retrieves and displays SSH backup metadata
-# Shows backup date and configuration info if available
-get_backup_metadata() {
-    if [ -f "/data/ssh_backup/metadata.txt" ]; then
-        cat /data/ssh_backup/metadata.txt
-    else
-        echo "No backup metadata found"
-    fi
-}
-
-# Tests SSH connectivity to GitHub
-# Verifies authentication and displays connection status
-test_ssh_connection() {
-    echo "Testing SSH connection to GitHub..."
-    result=$(ssh -vT git@github.com 2>&1)
-    if echo "$result" | grep -q "You've successfully authenticated"; then
-        echo "SSH connection test successful: You are successfully authenticating with GitHub."
-    else
-        echo "SSH connection test failed."
-    fi
-    read -p "Press enter to continue..."
-}
-
-# Generates new ED25519 SSH key pair
-# - Creates keys if they don't exist
-# - Displays public key for GitHub setup
-# - Prompts for GitHub addition confirmation
 generate_ssh_key() {
     if [ ! -f /home/comma/.ssh/github ]; then
         ssh-keygen -t ed25519 -f /home/comma/.ssh/github
-        echo "Displaying the SSH public key. Please add it to your GitHub account."
+        print_info "Displaying the SSH public key. Please add it to your GitHub account."
         cat /home/comma/.ssh/github.pub
-        read -p "Press enter to continue after adding the SSH key to your GitHub account..."
+        pause_for_user
     else
-        echo "SSH key already exists. Skipping SSH key generation..."
+        print_info "SSH key already exists. Skipping SSH key generation..."
     fi
 }
 
-# Repairs existing SSH setup or creates new one
-# - Fixes permissions and ownership issues
-# - Creates new setup if missing
-# - Verifies and tests configuration
 repair_create_ssh() {
-    if [[ " ${ssh_status[@]} " =~ "missing" || " ${ssh_status[@]} " =~ "missing_usr" ]]; then
-        echo "Creating SSH setup..."
+    print_info "Analyzing SSH setup..."
+    local home_ssh_exists=false
+    local usr_ssh_exists=false
+    local needs_permission_fix=false
+
+    # Check existence in both locations
+    [ -f "/home/comma/.ssh/github" ] && home_ssh_exists=true
+    [ -f "/usr/default/home/comma/.ssh/github" ] && usr_ssh_exists=true
+
+    # If SSH exists in persistent location but not in home
+    if [ "$usr_ssh_exists" = true ] && [ "$home_ssh_exists" = false ]; then
+        print_info "Restoring SSH key from persistent storage..."
+        mkdir -p /home/comma/.ssh
+        sudo cp /usr/default/home/comma/.ssh/github* /home/comma/.ssh/
+        sudo cp /usr/default/home/comma/.ssh/config /home/comma/.ssh/
+        sudo chown comma:comma /home/comma/.ssh -R
+        sudo chmod 600 /home/comma/.ssh/github
+        print_success "SSH files restored from persistent storage"
+        return 0
+    fi
+
+    # If missing from both locations but backup exists
+    if [ "$home_ssh_exists" = false ] && [ "$usr_ssh_exists" = false ] && check_ssh_backup; then
+        print_info "No SSH keys found. Restoring from backup..."
+        restore_ssh
+        return 0
+    fi
+
+    # If missing from both locations and no backup
+    if [ "$home_ssh_exists" = false ] && [ "$usr_ssh_exists" = false ]; then
+        print_info "Creating new SSH setup..."
         remove_ssh_contents
         create_ssh_config
         generate_ssh_key
+        copy_ssh_config_and_keys
+        backup_ssh
         test_ssh_connection
-    else
-        echo "Repairing SSH setup..."
-        [[ " ${ssh_status[@]} " =~ "fix_permissions" ]] && sudo chmod 600 /home/comma/.ssh/github
-        [[ " ${ssh_status[@]} " =~ "fix_owner" ]] && sudo chown comma:comma /home/comma/.ssh/github
-        [[ " ${ssh_status[@]} " =~ "fix_permissions_usr" ]] && sudo chmod 600 /usr/default/home/comma/.ssh/github
-        [[ " ${ssh_status[@]} " =~ "fix_owner_usr" ]] && sudo chown comma:comma /usr/default/home/comma/.ssh/github
+        return 0
     fi
-    copy_ssh_config_and_keys
-    read -p "Press enter to continue..."
+
+    # Check and fix permissions if needed
+    check_file_permissions_owner "/home/comma/.ssh/github" "-rw-------" "comma"
+    if [ $? -eq 1 ]; then
+        print_info "Fixing SSH permissions..."
+        sudo chmod 600 /home/comma/.ssh/github
+        sudo chown comma:comma /home/comma/.ssh/github
+        needs_permission_fix=true
+    fi
+
+    if [ -f "/usr/default/home/comma/.ssh/github" ]; then
+        check_file_permissions_owner "/usr/default/home/comma/.ssh/github" "-rw-------" "comma"
+        if [ $? -eq 1 ]; then
+            print_info "Fixing persistent SSH permissions..."
+            sudo chmod 600 /usr/default/home/comma/.ssh/github
+            sudo chown comma:comma /usr/default/home/comma/.ssh/github
+            needs_permission_fix=true
+        fi
+    fi
+
+    if [ "$needs_permission_fix" = true ]; then
+        copy_ssh_config_and_keys
+        print_success "SSH permissions fixed"
+    fi
+
+    pause_for_user
 }
 
-# Completely resets SSH configuration
-# - Backs up existing configuration if present
-# - Creates fresh SSH setup
-# - Generates new keys
-# - Tests new configuration
 reset_ssh() {
+    clear
     if [ -f "/home/comma/.ssh/github" ]; then
-        backup_ssh_files
+        backup_ssh
     fi
     remove_ssh_contents
     create_ssh_config
     generate_ssh_key
     copy_ssh_config_and_keys
-    backup_ssh_files
+    backup_ssh
     test_ssh_connection
-    read -p "Press enter to continue..."
+    print_info "Creating backup of new SSH setup..."
+    backup_ssh
+    pause_for_user
 }
 
-# Copies SSH configuration to persistent storage
-# - Ensures SSH survives reboots
-# - Maintains proper permissions
-# - Creates necessary directories
 copy_ssh_config_and_keys() {
     mount_rw
-    echo "Copying SSH config and keys to /usr/default/home/comma/.ssh/..."
+    print_info "Copying SSH config and keys to /usr/default/home/comma/.ssh/..."
     if [ ! -d /usr/default/home/comma/.ssh/ ]; then
         sudo mkdir -p /usr/default/home/comma/.ssh/
     fi
@@ -413,185 +665,635 @@ copy_ssh_config_and_keys() {
     sudo chmod 600 /usr/default/home/comma/.ssh/github
 }
 
-# Displays the public SSH key
-# Useful for adding key to GitHub
 view_ssh_key() {
+    clear
     if [ -f /home/comma/.ssh/github.pub ]; then
-        echo "Displaying the SSH public key:"
-        cat /home/comma/.ssh/github.pub
+        print_info "Displaying the SSH public key:"
+        echo -e "${GREEN}$(cat /home/comma/.ssh/github.pub)${NC}"
     else
-        echo "SSH public key does not exist."
+        print_error "SSH public key does not exist."
     fi
-    read -p "Press enter to continue..."
+    pause_for_user
 }
 
-# Removes all SSH-related files
-# Used during reset operations
 remove_ssh_contents() {
+    clear
     mount_rw
-    echo "Removing SSH folder contents..."
+    print_info "Removing SSH folder contents..."
     rm -rf /home/comma/.ssh/*
     sudo rm -rf /usr/default/home/comma/.ssh/*
+}
+
+import_ssh_keys() {
+    local private_key_file="$1"
+    local public_key_file="$2"
+
+    # Create SSH directory
+    clear
+    print_info "Importing SSH keys..."
+
+    if [ ! -d /home/comma/.ssh ]; then
+        print_info "Creating SSH directory..."
+        mkdir -p /home/comma/.ssh
+    fi
+
+    # Copy key files
+    print_info "Copying Private Key to /home/comma/.ssh/github..."
+    cp "$private_key_file" "/home/comma/.ssh/github_test"
+    print_info "Copying Public Key to /home/comma/.ssh/github_test.pub..."
+    cp "$public_key_file" "/home/comma/.ssh/github.pub_test"
+
+    # Set permissions
+    print_info "Setting key permissions..."
+    chmod 600 /home/comma/.ssh/github_test
+    chmod 644 /home/comma/.ssh/github.pub_test
+    chown -R comma:comma /home/comma/.ssh
+
+    # Create SSH config
+    create_ssh_config
+
+    # Copy to persistent storage
+    copy_ssh_config_and_keys
+
+    # Create backup
+    backup_ssh
+
+    # Test connection
+    test_ssh_connection
+
+    print_success "SSH configuration completed successfully"
+}
+
+import_ssh_menu() {
+    clear
+    echo "+----------------------------------------------+"
+    echo "|           SSH Transfer Tool Info              |"
+    echo "+----------------------------------------------+"
+    echo "This tool allows you to transfer SSH keys from your computer"
+    echo "to your comma device automatically."
+    echo ""
+    echo "To use the transfer tool, run this command on your computer:"
+    echo ""
+    echo -e "${GREEN}cd /data && wget https://raw.githubusercontent.com/tonesto7/op-utilities/main/CommaSSHTransfer.sh && chmod +x CommaSSHTransfer.sh && ./CommaSSHTransfer.sh${NC}"
+    echo ""
+    echo "The tool will:"
+    echo "1. Show available SSH keys on your computer"
+    echo "2. Let you select which key to transfer"
+    echo "3. Ask for your comma device's IP address"
+    echo "4. Automatically transfer and configure the keys"
+    echo "5. Create necessary backups"
+    echo ""
+    echo "Requirements:"
+    echo "- SSH access to your comma device"
+    echo "- Existing SSH keys on your computer"
+    echo "- Network connection to your comma device"
+    pause_for_user
+}
+
+###############################################################################
+# SSH Metadata Functions
+###############################################################################
+
+save_backup_metadata() {
+    local backup_time
+    backup_time=$(date '+%Y-%m-%d %H:%M:%S')
+    cat >/data/ssh_backup/metadata.txt <<EOF
+Backup Date: $backup_time
+Last SSH Test: $backup_time
+EOF
+}
+
+get_backup_metadata() {
+    if [ -f "/data/ssh_backup/metadata.txt" ]; then
+        cat /data/ssh_backup/metadata.txt
+    else
+        print_warning "No backup metadata found"
+    fi
+}
+
+###############################################################################
+# Disk Space Management
+###############################################################################
+
+verify_disk_space() {
+    local required_space=$1
+    local available=$(df -m "$BUILD_DIR" | awk 'NR==2 {print $4}')
+    if [ "$available" -lt "$required_space" ]; then
+        print_error "Insufficient disk space. Need ${required_space}MB, have ${available}MB"
+        return 1
+    fi
+    return 0
 }
 
 ###############################################################################
 # Git/Openpilot Status Functions
 ###############################################################################
 
-# Displays condensed disk space for main menu
-# Shows used, total, and percentage
 display_disk_space_short() {
-    local data_usage_root=$(df -h / | awk 'NR==2 {printf "Used: %s/%s (%s)", $3, $2, $5}')
-    local data_usage_data=$(df -h /data | awk 'NR==2 {printf "Used: %s/%s (%s)", $3, $2, $5}')
-    echo "| Disk Space (/): $data_usage_root"
-    echo "| Disk Space (/data): $data_usage_data"
+    print_info "| Disk Space:"
+    local data_usage_root
+    local data_usage_data
+    data_usage_root=$(df -h / | awk 'NR==2 {printf "Used: %s/%s (%s)", $3, $2, $5}')
+    data_usage_data=$(df -h /data | awk 'NR==2 {printf "Used: %s/%s (%s)", $3, $2, $5}')
+    echo "| ├─ (/):     $data_usage_root"
+    echo "| └─ (/data): $data_usage_data"
 }
 
-# Displays condensed Git status for main menu
-# Shows current branch or indicates missing repository
 display_git_status_short() {
+    print_info "| Openpilot Repository:"
     if [ -d "/data/openpilot" ]; then
-        cd "/data/openpilot" || return
-        branch_name=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-        cd - >/dev/null 2>&1
-        echo "| Git Branch: $branch_name"
+        (
+            cd "/data/openpilot" || return
+            local repo_name
+            local branch_name
+            repo_name=$(git config --get remote.origin.url | awk -F'/' '{print $NF}' | sed 's/.git//')
+            branch_name=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+            echo "| ├─ Repository: $repo_name"
+            echo "| └─ Branch: $branch_name"
+        )
     else
-        echo "| Git Branch: Missing"
+        echo -e "${YELLOW}| └─ Repository: Missing${NC}"
     fi
 }
 
-# Shows detailed Git repository information
-# - Repository presence
-# - Current branch
-# - Remote URL
 display_git_status() {
-    echo "+----------------------------------------------+"
-    echo "|       Openpilot Repository                   |"
-    echo "+----------------------------------------------+"
     if [ -d "/data/openpilot" ]; then
-        cd "/data/openpilot" || exit 1
-        branch_name=$(git rev-parse --abbrev-ref HEAD)
-        repo_url=$(git config --get remote.origin.url)
-        echo "- Openpilot directory: ✅"
-        echo "- Current branch: $branch_name"
-        echo "- Repository URL: $repo_url"
-        cd - >/dev/null 2>&1
+        # echo "| Gathering repository details, please wait..."
+
+        (
+            cd "/data/openpilot" || exit 1
+            local branch_name
+            local repo_url
+            local repo_status
+            local submodule_status
+
+            branch_name=$(git rev-parse --abbrev-ref HEAD)
+            repo_url=$(git config --get remote.origin.url)
+
+            # Check if working directory is clean
+            if [ -n "$(git status --porcelain)" ]; then
+                repo_status="${RED}Uncommitted changes${NC}"
+            else
+                repo_status="${GREEN}Clean${NC}"
+            fi
+
+            # Check submodule status
+            if [ -f ".gitmodules" ]; then
+                if git submodule status | grep -q '^-'; then
+                    submodule_status="${RED}Not initialized${NC}"
+                elif git submodule status | grep -q '^+'; then
+                    submodule_status="${YELLOW}Out of date${NC}"
+                else
+                    submodule_status="${GREEN}Up to date${NC}"
+                fi
+            else
+                submodule_status="No submodules"
+            fi
+
+            # clear
+            # echo "+----------------------------------------------+"
+            echo "| Openpilot directory: ✅"
+            echo "| ├─ Branch: $branch_name"
+            echo "| ├─ Repo: $repo_url"
+            echo -e "| ├─ Status: $repo_status"
+            echo -e "| └─ Submodules: $submodule_status"
+        )
     else
-        echo "- Openpilot directory: ❌"
+        echo "| Openpilot directory: ❌"
     fi
-    echo "+----------------------------------------------+"
 }
 
-# Lists all available Git branches
-# Shows both local and remote branches
 list_git_branches() {
+    clear
     echo "+----------------------------------------------+"
     echo "|        Available Branches                    |"
     echo "+----------------------------------------------+"
     if [ -d "/data/openpilot" ]; then
-        cd "/data/openpilot" || return
-        branches=$(git branch --all)
-        if [ -n "$branches" ]; then
-            echo "$branches"
-        else
-            echo "No branches found."
-        fi
-        cd - >/dev/null 2>&1
+        (
+            cd "/data/openpilot" || return
+            local branches
+            branches=$(git branch --all)
+            if [ -n "$branches" ]; then
+                echo "$branches"
+            else
+                echo "No branches found."
+            fi
+        )
     else
         echo "Openpilot directory does not exist."
     fi
     echo "+----------------------------------------------+"
-    read -p "Press enter to continue..."
+    pause_for_user
 }
 
-# Updates current branch with latest changes
-# - Fetches remote updates
-# - Pulls changes into current branch
-fetch_pull_latest_changes() {
-    echo "Fetching and pulling the latest changes for the current branch..."
-    if [ -d "/data/openpilot" ]; then
-        cd "/data/openpilot" || return
-        git fetch
-        git pull
-        cd - >/dev/null 2>&1
-    else
-        echo "No openpilot directory found."
-    fi
-    read -p "Press enter to continue..."
-}
-
-# Changes the current Git branch
-# - Fetches latest branches
-# - Switches to specified branch
-change_branch() {
-    echo "Changing the branch of the repository..."
-    if [ -d "/data/openpilot" ]; then
-        cd "/data/openpilot" || return
-        git fetch
-        read -p "Enter the branch name: " branch_name
-        git checkout "$branch_name"
-        cd - >/dev/null 2>&1
-    else
-        echo "No openpilot directory found."
-    fi
-    read -p "Press enter to continue..."
-}
-
-# Clones Openpilot repository with specified options
+# Reusable branch selection function.
 # Parameters:
-# - shallow: boolean for depth-1 clone
-# Prompts for:
-# - Branch name
-# - Repository URL
+#   $1 - Repository URL (e.g., git@github.com:username/repo.git)
+# Returns:
+#   Sets SELECTED_BRANCH with the chosen branch name.
+select_branch_menu() {
+    clear
+    local repo_url="$1"
+    local remote_branches branch_array branch_count branch_choice
+    SELECTED_BRANCH="" # Reset global variable
+
+    # Display placeholder message.
+    print_info "Fetching branches from ${repo_url}, please wait..."
+
+    # Fetch branch list using git ls-remote.
+    remote_branches=$(git ls-remote --heads "$repo_url" 2>/dev/null | awk '{print $2}' | sed 's#refs/heads/##')
+    if [ -z "$remote_branches" ]; then
+        print_error "No branches found or failed to contact repository: $repo_url"
+        return 1
+    fi
+
+    clear
+    # Load branches into an array.
+    readarray -t branch_array <<<"$remote_branches"
+    branch_count=${#branch_array[@]}
+
+    # Display branch menu.
+    echo "Available branches from ${repo_url}:"
+    for ((i = 0; i < branch_count; i++)); do
+        printf "%d) %s\n" $((i + 1)) "${branch_array[i]}"
+    done
+
+    # Prompt for selection.
+    while true; do
+        read -p "Select a branch by number (or 'q' to cancel): " branch_choice
+        if [[ "$branch_choice" =~ ^[Qq]$ ]]; then
+            print_info "Branch selection canceled."
+            return 1
+        elif [[ "$branch_choice" =~ ^[0-9]+$ ]] && [ "$branch_choice" -ge 1 ] && [ "$branch_choice" -le "$branch_count" ]; then
+            SELECTED_BRANCH="${branch_array[$((branch_choice - 1))]}"
+            print_info "Selected branch: $SELECTED_BRANCH"
+            break
+        else
+            print_error "Invalid choice. Please enter a number between 1 and ${branch_count}."
+        fi
+    done
+
+    return 0
+}
+
+fetch_pull_latest_changes() {
+    print_info "Fetching and pulling the latest changes for the current branch..."
+    if [ -d "/data/openpilot" ]; then
+        (
+            cd "/data/openpilot" || return
+
+            if ! git_operation_with_timeout "git fetch" 60; then
+                print_error "Failed to fetch latest changes"
+                return 1
+            fi
+
+            if ! git_operation_with_timeout "git pull" 300; then
+                print_error "Failed to pull latest changes"
+                return 1
+            fi
+
+            print_success "Successfully updated repository"
+        )
+    else
+        print_warning "No openpilot directory found."
+    fi
+    pause_for_user
+}
+
+change_branch() {
+    clear
+    print_info "Changing the branch of the repository..."
+
+    # Directory check
+    if [ ! -d "/data/openpilot" ]; then
+        print_error "No openpilot directory found."
+        pause_for_user
+        return 1
+    fi
+    cd "/data/openpilot" || {
+        print_error "Could not change to openpilot directory"
+        pause_for_user
+        return 1
+    }
+
+    # Working directory check with force options
+    if ! check_working_directory; then
+        print_warning "Working directory has uncommitted changes."
+        echo ""
+        echo "Options:"
+        echo "1. Stash changes (save them for later)"
+        echo "2. Discard changes and force branch switch"
+        echo "3. Cancel branch switch"
+        echo ""
+        read -p "Enter your choice (1-3): " force_choice
+
+        case $force_choice in
+        1)
+            if ! git stash; then
+                print_error "Failed to stash changes"
+                pause_for_user
+                return 1
+            fi
+            print_success "Changes stashed successfully"
+            ;;
+        2)
+            print_warning "This will permanently discard all uncommitted changes!"
+            read -p "Are you sure? (y/N): " confirm
+            if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+                print_info "Branch switch cancelled"
+                pause_for_user
+                return 1
+            fi
+            ;;
+        *)
+            print_info "Branch switch cancelled"
+            pause_for_user
+            return 1
+            ;;
+        esac
+    fi
+
+    # Repository URL
+    local repo_url
+    repo_url=$(git config --get remote.origin.url)
+    if [ -z "$repo_url" ]; then
+        print_error "Could not determine repository URL"
+        pause_for_user
+        return 1
+    fi
+
+    # Fetch latest
+    print_info "Fetching latest repository information..."
+    if ! git fetch; then
+        print_error "Failed to fetch latest information"
+        pause_for_user
+        return 1
+    fi
+
+    # Branch selection
+    if ! select_branch_menu "$repo_url"; then
+        print_error "Branch selection cancelled or failed"
+        pause_for_user
+        return 1
+    fi
+
+    if [ -z "$SELECTED_BRANCH" ]; then
+        print_error "No branch was selected"
+        pause_for_user
+        return 1
+    fi
+
+    clear
+    print_info "Switching to branch: $SELECTED_BRANCH"
+
+    # If force switch chosen, clean everything
+    if [ "$force_choice" = "2" ]; then
+        print_info "Cleaning repository and submodules..."
+
+        # Reset main repository
+        git reset --hard HEAD
+
+        # Clean untracked files
+        git clean -fd
+    fi
+
+    # Checkout branch
+    if ! git checkout "$SELECTED_BRANCH"; then
+        print_error "Failed to checkout branch: $SELECTED_BRANCH"
+        pause_for_user
+        return 1
+    fi
+
+    # Handle submodules
+    print_info "Updating submodules..."
+
+    # First deinitialize all submodules
+    git submodule deinit -f .
+
+    # Remove old submodule directories
+    local submodules=("msgq_repo" "opendbc_repo" "panda" "rednose_repo" "teleoprtc_repo" "tinygrad_repo")
+    for submodule in "${submodules[@]}"; do
+        if [ -d "$submodule" ]; then
+            print_info "Removing old $submodule directory..."
+            rm -rf "$submodule"
+            rm -rf ".git/modules/$submodule"
+        fi
+    done
+
+    # Initialize and update submodules
+    print_info "Initializing submodules..."
+    if ! git submodule init; then
+        print_error "Failed to initialize submodules"
+        pause_for_user
+        return 1
+    fi
+
+    print_info "Updating submodules (this may take a while)..."
+    if ! git submodule update --recursive; then
+        print_error "Failed to update submodules"
+        pause_for_user
+        return 1
+    fi
+
+    print_success "Successfully switched to branch: $SELECTED_BRANCH"
+    print_success "All submodules have been updated"
+
+    # Handle stashed changes if applicable
+    if [ "$force_choice" = "1" ]; then
+        echo ""
+        read -p "Would you like to reapply your stashed changes? (y/N): " reapply
+        if [[ "$reapply" =~ ^[Yy]$ ]]; then
+            if ! git stash pop; then
+                print_warning "Note: There were conflicts while reapplying changes."
+                print_info "Your changes are still saved in the stash."
+                print_info "Use 'git stash list' to see them and 'git stash pop' to try again."
+            else
+                print_success "Stashed changes reapplied successfully"
+            fi
+        fi
+    fi
+
+    pause_for_user
+    return 0
+}
+
+reset_git_changes() {
+    clear
+    if [ ! -d "/data/openpilot" ]; then
+        print_error "Openpilot directory does not exist."
+        pause_for_user
+        return 1
+    fi
+
+    cd "/data/openpilot" || return 1
+
+    echo "This will reset all uncommitted changes in the repository."
+    echo "Options:"
+    echo "1. Soft reset (preserve changes but unstage them)"
+    echo "2. Hard reset (discard all changes)"
+    echo "3. Clean (remove untracked files)"
+    echo "4. Hard reset and clean (complete reset)"
+    echo "Q. Cancel"
+
+    read -p "Enter your choice: " reset_choice
+
+    case $reset_choice in
+    1)
+        git reset HEAD
+        print_success "Soft reset completed."
+        ;;
+    2)
+        git reset --hard HEAD
+        print_success "Hard reset completed."
+        ;;
+    3)
+        read -p "Remove untracked files? This cannot be undone. (y/N): " confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            git clean -fd
+            print_success "Repository cleaned."
+        fi
+        ;;
+    4)
+        read -p "This will remove ALL changes and untracked files. Continue? (y/N): " confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            git reset --hard HEAD
+            git clean -fd
+            print_success "Repository reset and cleaned."
+        fi
+        ;;
+    [qQ]) return 0 ;;
+    *) print_error "Invalid choice." ;;
+    esac
+    pause_for_user
+}
+
+manage_submodules() {
+    clear
+    if [ ! -d "/data/openpilot" ]; then
+        print_error "Openpilot directory does not exist."
+        pause_for_user
+        return 1
+    fi
+
+    cd "/data/openpilot" || return 1
+
+    echo "Submodule Management:"
+    echo "1. Initialize submodules"
+    echo "2. Update submodules"
+    echo "3. Reset submodules"
+    echo "4. Status check"
+    echo "5. Full reset (initialize, update, and reset)"
+    echo "Q. Cancel"
+
+    read -p "Enter your choice: " submodule_choice
+
+    case $submodule_choice in
+    1)
+        print_info "Initializing submodules..."
+        git submodule init
+        print_success "Submodules initialized."
+        ;;
+    2)
+        print_info "Updating submodules..."
+        git submodule update
+        print_success "Submodules updated."
+        ;;
+    3)
+        print_info "Resetting submodules..."
+        git submodule foreach --recursive 'git reset --hard HEAD'
+        print_success "Submodules reset."
+        ;;
+    4)
+        print_info "Submodule status:"
+        git submodule status
+        ;;
+    5)
+        print_info "Performing full submodule reset..."
+        git submodule update --init --recursive
+        git submodule foreach --recursive 'git reset --hard HEAD'
+        print_success "Full submodule reset completed."
+        ;;
+    [qQ]) return 0 ;;
+    *) print_error "Invalid choice." ;;
+    esac
+    pause_for_user
+}
+
+# Clone the Openpilot repository
 clone_openpilot_repo() {
     local shallow="${1:-true}"
+
+    # Check available disk space first
+    verify_disk_space 2000 || {
+        print_error "Insufficient space for repository clone"
+        return 1
+    }
+
     read -p "Enter the branch name: " branch_name
     read -p "Enter the GitHub repository (e.g., ford-op/openpilot): " github_repo
-    cd /data
+    cd /data || return
     rm -rf ./openpilot
+
     if [ "$shallow" = true ]; then
-        git clone -b "$branch_name" --depth 1 git@github.com:"$github_repo" openpilot
-        cd openpilot
-        git submodule update --init --recursive
+        if ! git_operation_with_timeout "git clone -b $branch_name --depth 1 git@github.com:$github_repo openpilot" 300; then
+            print_error "Failed to clone repository"
+            return 1
+        fi
+        (
+            cd openpilot || return
+            if ! git_operation_with_timeout "git submodule update --init --recursive" 300; then
+                print_error "Failed to update submodules"
+                return 1
+            fi
+        )
     else
-        git clone -b "$branch_name" git@github.com:"$github_repo" openpilot
-        cd openpilot
-        git submodule update --init --recursive
+        if ! git_operation_with_timeout "git clone -b $branch_name git@github.com:$github_repo openpilot" 300; then
+            print_error "Failed to clone repository"
+            return 1
+        fi
+        (
+            cd openpilot || return
+            if ! git_operation_with_timeout "git submodule update --init --recursive" 300; then
+                print_error "Failed to update submodules"
+                return 1
+            fi
+        )
     fi
-    cd openpilot
-    read -p "Press enter to continue..."
+    pause_for_user
 }
 
-# Removes and re-clones Openpilot repository
-# Used for complete repository reset
 reset_openpilot_repo() {
-    echo "Removing the Openpilot repository..."
-    cd /data
-    rm -rf openpilot
-    clone_openpilot_repo "true"
+    read -p "Are you sure you want to reset the Openpilot repository? This will remove the current repository and clone a new one. (y/N): " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        print_info "Removing the Openpilot repository..."
+        cd /data || return
+        rm -rf openpilot
+        clone_openpilot_repo "true"
+    else
+        print_info "Reset cancelled."
+    fi
 }
 
 ###############################################################################
-# System Status Functions
+# System Status & Logs
 ###############################################################################
 
-# Displays general system status
-# - Shows AGNOS version
-display_general_status_short() {
+display_os_info_short() {
+    print_info "| OS Information:"
+    local agnos_version
     agnos_version=$(cat /VERSION 2>/dev/null)
     if [ -n "$agnos_version" ]; then
-        echo "| AGNOS: v$agnos_version"
+        echo "| └─ AGNOS: v$agnos_version"
     else
-        echo "| AGNOS: Unknown"
+        echo "| └─ AGNOS: Unknown"
     fi
 }
 
-# Shows detailed system information
-# - AGNOS version
-# - Build time
 display_general_status() {
-    agnos_version=$(cat /VERSION)
-    build_time=$(awk 'NR==2' /BUILD)
+    local agnos_version
+    local build_time
+    agnos_version=$(cat /VERSION 2>/dev/null)
+    build_time=$(awk 'NR==2' /BUILD 2>/dev/null)
     echo "+----------------------------------------------+"
     echo "|           Other Items                        |"
     echo "+----------------------------------------------+"
@@ -599,40 +1301,57 @@ display_general_status() {
     echo "+----------------------------------------------+"
 }
 
-# Monitors and manages root filesystem space
-# - Checks usage percentage
-# - Offers resize option if full
+# Combined or replaced by check_disk_usage_and_resize + resize_root_if_needed
 check_root_space() {
-    root_usage=$(df -h / | awk 'NR==2 {gsub("%","",$5); print $5}')
-    if [ "$root_usage" -ge 100 ]; then
-        echo ""
-        echo "Warning: Root filesystem is full."
-        echo "To fix this, do you want to resize the root filesystem?"
-        read -p "Enter y or n: " root_space_choice
-        if [ "$root_space_choice" = "y" ]; then
-            sudo mount -o remount,rw /
-            sudo resize2fs $(findmnt -n -o SOURCE /)
-            echo "Root filesystem resized successfully."
-        fi
-    fi
+    local usage
+    usage=$(check_disk_usage_and_resize)
+    resize_root_if_needed "$usage"
 }
 
-# Remounts root filesystem as read-write
-# Required for system modifications
 mount_rw() {
-    echo "Mounting the / partition as read-write..."
+    print_info "Mounting the / partition as read-write..."
     sudo mount -o remount,rw /
 }
 
-# Displays and manages system log files
-# - Lists available logs
-# - Allows viewing individual logs
+check_prerequisites() {
+    local errors=0
+
+    # Check disk space in /data
+    local available_space
+    available_space=$(df -m /data | awk 'NR==2 {print $4}')
+    if [ "$available_space" -lt 1000 ]; then
+        print_warning "Low disk space on /data: ${available_space}MB available"
+        errors=$((errors + 1))
+    fi
+
+    # Check network connectivity
+    if ! ping -c 1 github.com >/dev/null 2>&1; then
+        print_error "No network connectivity to GitHub"
+        errors=$((errors + 1))
+    fi
+
+    # Check git installation
+    if ! command -v git >/dev/null 2>&1; then
+        print_error "Git is not installed"
+        errors=$((errors + 1))
+    fi
+
+    if [ $errors -gt 0 ]; then
+        print_warning "Some prerequisites checks failed. Some features may not work correctly."
+        pause_for_user
+    fi
+
+    return $errors
+}
+
 display_logs() {
     clear
     echo "+---------------------------------+"
     echo "|            Log Files            |"
     echo "+---------------------------------+"
+    local log_files
     log_files=(/data/log/*)
+    local i
     for i in "${!log_files[@]}"; do
         echo "$((i + 1)). ${log_files[$i]}"
     done
@@ -641,82 +1360,158 @@ display_logs() {
     read -p "Enter the number of the log file to view or [Q] to go back: " log_choice
 
     if [[ $log_choice =~ ^[0-9]+$ ]] && ((log_choice > 0 && log_choice <= ${#log_files[@]})); then
-        log_file="${log_files[$((log_choice - 1))]}"
+        local log_file="${log_files[$((log_choice - 1))]}"
         echo "Displaying contents of $log_file:"
         cat "$log_file"
     elif [[ $log_choice =~ ^[Qq]$ ]]; then
         return
     else
-        echo "Invalid choice."
+        print_error "Invalid choice."
     fi
 
-    read -p "Press enter to continue..."
+    pause_for_user
 }
 
-# View error log at /data/community/crashes/error.txt
 view_error_log() {
-    echo "Displaying error log at /data/community/crashes/error.txt:"
-    cat /data/community/crashes/error.txt
-    read -p "Press enter to continue..."
+    print_info "Displaying error log at /data/community/crashes/error.txt:"
+    cat /data/community/crashes/error.txt 2>/dev/null || print_warning "No error log found."
+    pause_for_user
 }
 
-# Initiates system reboot with confirmation
 reboot_device() {
-    echo "Rebooting the device..."
+    print_info "Rebooting the device..."
     sudo reboot
 }
 
-# Initiates system shutdown with confirmation
 shutdown_device() {
-    echo "Shutting down the device..."
+    print_info "Shutting down the device..."
     sudo shutdown now
 }
 
-# Updates this utility script
-# Downloads latest version from GitHub
+###############################################################################
+# Script Update Logic
+###############################################################################
+
 update_script() {
-    echo "Downloading the latest version of the script..."
-    
-    # Get absolute path of script
-    local script_path=$(get_absolute_path "$SCRIPT_DIR/CommaUtility.sh")
-    
-    # Create backup of current script
+    print_info "Downloading the latest version of the script..."
+
+    local script_path
+    script_path=$(get_absolute_path "$SCRIPT_DIR/CommaUtility.sh")
     cp "$script_path" "$script_path.backup"
 
-    if wget -O "$script_path.tmp" https://raw.githubusercontent.com/tonesto7/op-utilities/main/CommaUtility.sh; then
-        # If download successful, replace old script
+    local download_cmd="wget -O '$script_path.tmp' https://raw.githubusercontent.com/tonesto7/op-utilities/main/CommaUtility.sh"
+    if execute_with_network_retry "$download_cmd" "Script update download failed"; then
         mv "$script_path.tmp" "$script_path"
         chmod +x "$script_path"
-        echo "Script updated successfully. Restarting the updated script."
-        read -p "Press enter to continue..."
+        print_success "Script updated successfully. Restarting the updated script."
+        pause_for_user
         exec "$script_path"
     else
-        echo "Update failed. Restoring backup..."
+        print_error "Update failed. Restoring backup..."
         mv "$script_path.backup" "$script_path"
         rm -f "$script_path.tmp"
-        read -p "Press enter to continue..."
+        pause_for_user
     fi
 }
 
+compare_versions() {
+    local ver1="$1"
+    local ver2="$2"
+
+    # Remove 'v' prefix if present
+    ver1="${ver1#v}"
+    ver2="${ver2#v}"
+
+    # Split versions into arrays
+    IFS='.' read -ra VER1 <<<"$ver1"
+    IFS='.' read -ra VER2 <<<"$ver2"
+
+    # Compare each part of version
+    for i in {0..2}; do
+        local v1=$([[ ${VER1[$i]} ]] && echo "${VER1[$i]}" || echo "0")
+        local v2=$([[ ${VER2[$i]} ]] && echo "${VER2[$i]}" || echo "0")
+
+        # Convert to integers for comparison
+        v1=$(echo "$v1" | sed 's/[^0-9]//g')
+        v2=$(echo "$v2" | sed 's/[^0-9]//g')
+
+        if ((v1 > v2)); then
+            echo "1"
+            return
+        elif ((v1 < v2)); then
+            echo "-1"
+            return
+        fi
+    done
+    echo "0"
+}
+
+# Add this function to compare semantic versions
+compare_versions() {
+    local ver1="$1"
+    local ver2="$2"
+
+    # Remove 'v' prefix if present
+    ver1="${ver1#v}"
+    ver2="${ver2#v}"
+
+    # Split versions into arrays
+    IFS='.' read -ra VER1 <<<"$ver1"
+    IFS='.' read -ra VER2 <<<"$ver2"
+
+    # Compare each part of version
+    for i in {0..2}; do
+        local v1=$([[ ${VER1[$i]} ]] && echo "${VER1[$i]}" || echo "0")
+        local v2=$([[ ${VER2[$i]} ]] && echo "${VER2[$i]}" || echo "0")
+
+        # Convert to integers for comparison
+        v1=$(echo "$v1" | sed 's/[^0-9]//g')
+        v2=$(echo "$v2" | sed 's/[^0-9]//g')
+
+        if ((v1 > v2)); then
+            echo "1"
+            return
+        elif ((v1 < v2)); then
+            echo "-1"
+            return
+        fi
+    done
+    echo "0"
+}
+
 check_for_updates() {
-    echo "Checking for script updates..."
-    # Download version info from latest script
-    latest_version=$(wget -qO- https://raw.githubusercontent.com/tonesto7/op-utilities/main/CommaUtility.sh | grep "SCRIPT_VERSION=" | head -n 1 | cut -d'"' -f2)
+    print_info "Checking for script updates..."
+
+    # Add timeout and retry logic for wget
+    local max_attempts=3
+    local attempt=1
+    local latest_version=""
+
+    while [ $attempt -le $max_attempts ]; do
+        if latest_version=$(wget --timeout=10 -qO- https://raw.githubusercontent.com/tonesto7/op-utilities/main/CommaUtility.sh | grep "SCRIPT_VERSION=" | head -n 1 | cut -d'"' -f2); then
+            break
+        fi
+        attempt=$((attempt + 1))
+        [ $attempt -le $max_attempts ] && sleep 2
+    done
 
     if [ -z "$latest_version" ]; then
-        echo "Unable to check for updates. Please check your internet connection."
+        print_error "Unable to check for updates after $max_attempts attempts."
         return 1
     fi
 
-    # Compare versions
-    if [ "$SCRIPT_VERSION" != "$latest_version" ]; then
-        echo "New version available: v$latest_version (Current: v$SCRIPT_VERSION)"
+    local version_comparison=$(compare_versions "$latest_version" "$SCRIPT_VERSION")
+
+    if [ "$version_comparison" = "1" ]; then
+        print_info "New version available: v$latest_version (Current: v$SCRIPT_VERSION)"
         read -p "Would you like to update now? (y/N): " update_choice
         if [[ "$update_choice" =~ ^[Yy]$ ]]; then
             update_script
         fi
+    elif [ "$version_comparison" = "0" ]; then
+        print_info "Script is up to date (v$SCRIPT_VERSION)"
     else
-        echo "Script is up to date (v$SCRIPT_VERSION)"
+        print_warning "Current version (v$SCRIPT_VERSION) is ahead of remote version (v$latest_version)"
     fi
 }
 
@@ -724,8 +1519,6 @@ check_for_updates() {
 # BluePilot Utility Functions (from build_bluepilot)
 ###############################################################################
 
-# Resets script variables
-# Clears previous build options
 reset_variables() {
     SCRIPT_ACTION=""
     REPO=""
@@ -733,78 +1526,84 @@ reset_variables() {
     BUILD_BRANCH=""
 }
 
-# Displays help information for the script
 show_help() {
     cat <<EOL
 CommaUtility Script (V$SCRIPT_VERSION) - Last Modified: $SCRIPT_MODIFIED
 ------------------------------------------------------------
 
-Usage: ./CommaUtility.sh [OPTIONS]
-
-Build Options:
-  --build-dev                       Build BP Internal Dev
-  --build-public                    Build BP Public Experimental
-  --custom-build                    Perform a custom build
-    --repo <repository_name>        Select repository (bluepilotdev or sp-dev-c3)
-    --clone-branch <branch_name>    Branch to clone from the selected repository
-    --build-branch <branch_name>    Branch name for the build
-
-Clone Options:
-  --clone-public-bp                 Clone BP staging-DONOTUSE Repo
-  --clone-internal-dev-build        Clone bp-internal-dev-build
-  --clone-internal-dev              Clone bp-internal-dev
-  --custom-clone                    Perform a custom clone
-    --repo <repository_name>        Select repository (bluepilotdev, sp-dev-c3, or sunnypilot)
-    --clone-branch <branch_name>    Branch to clone from the selected repository
-
-System Operations:
-  --update                          Update this script to the latest version
-  --reboot                          Reboot the device
-  --shutdown                        Shutdown the device
-  --view-logs                       View system logs
+Usage: ./CommaUtility.sh [OPTION] [PARAMETERS]
 
 SSH Operations:
+  --import-ssh                      Import SSH keys from files
+    --private-key-file <path>       Path to private key file
+    --public-key-file <path>        Path to public key file
   --test-ssh                        Test SSH connection to GitHub
   --backup-ssh                      Backup SSH files
   --restore-ssh                     Restore SSH files from backup
   --reset-ssh                       Reset SSH configuration
 
+Build Operations:
+  --build-dev                       Build BluePilot internal dev
+  --build-public                    Build BluePilot public experimental
+  --custom-build                    Perform a custom build
+    --repo <repository>             Select repository (bluepilotdev, sp-dev-c3, sunnypilot, or commaai)
+    --clone-branch <branch>         Branch to clone
+    --build-branch <branch>         Branch name for build
+
+Clone Operations:
+  --clone-public-bp                 Clone BluePilot staging branch
+  --clone-internal-dev-build        Clone BluePilot internal dev build
+  --clone-internal-dev              Clone BluePilot internal dev
+  --custom-clone                    Clone a specific repository/branch
+    --repo <repository>             Repository to clone from
+    --clone-branch <branch>         Branch to clone
+
+System Operations:
+  --update                          Update this script to latest version
+  --reboot                          Reboot the device
+  --shutdown                        Shutdown the device
+  --view-logs                       View system logs
+
 Git Operations:
   --git-pull                        Fetch and pull latest changes
   --git-status                      Show Git repository status
-  --git-branch <branch_name>        Switch to specified branch
+  --git-branch <branch>            Switch to specified branch
 
 General:
-  -h, --help                        Show this help message and exit
+  -h, --help                        Show this help message
 
 Examples:
+  # SSH operations
+  ./CommaUtility.sh --import-ssh --private-key-file /path/to/key --public-key-file /path/to/key.pub
+  ./CommaUtility.sh --test-ssh
+
   # Build operations
-  ./CommaUtility.sh --build-dev
-  ./CommaUtility.sh --build-public
-  ./CommaUtility.sh --custom-build --repo bluepilotdev --clone-branch feature --build-branch build-feature
+  ./CommaUtility.sh --custom-build --repo bluepilotdev --clone-branch dev --build-branch build
 
   # Clone operations
-  ./CommaUtility.sh --custom-clone --repo sp-dev-c3 --clone-branch experimental
+  ./CommaUtility.sh --custom-clone --repo sunnypilot --clone-branch master
 
   # System operations
   ./CommaUtility.sh --update
   ./CommaUtility.sh --reboot
 
-  # SSH operations
-  ./CommaUtility.sh --test-ssh
-  ./CommaUtility.sh --backup-ssh
-
   # Git operations
-  ./CommaUtility.sh --git-pull
-  ./CommaUtility.sh --git-branch my-branch
+  ./CommaUtility.sh --git-branch master
+
+Note: When no options are provided, the script will launch in interactive menu mode.
 EOL
 }
 
+###############################################################################
+# BluePilot build logic
+###############################################################################
+
 setup_git_env_bp() {
     if [ -f "$BUILD_DIR/release/identity_ford_op.sh" ]; then
+        # shellcheck disable=SC1090
         source "$BUILD_DIR/release/identity_ford_op.sh"
     else
-        echo "[-] identity_ford_op.sh not found"
+        print_error "[-] identity_ford_op.sh not found"
         exit 1
     fi
 
@@ -813,14 +1612,14 @@ setup_git_env_bp() {
     elif [ -f ~/.ssh/github ]; then
         export GIT_SSH_COMMAND="ssh -i ~/.ssh/github"
     else
-        echo "[-] No git key found"
+        print_error "[-] No git key found"
         exit 1
     fi
 }
 
 build_openpilot_bp() {
     export PYTHONPATH="$BUILD_DIR"
-    echo "[-] Building Openpilot"
+    print_info "[-] Building Openpilot"
     scons -j"$(nproc)"
 }
 
@@ -829,7 +1628,7 @@ create_prebuilt_marker() {
 }
 
 handle_panda_directory() {
-    echo "Creating panda_tmp directory"
+    print_info "Creating panda_tmp directory"
     mkdir -p "$BUILD_DIR/panda_tmp/board/obj"
     mkdir -p "$BUILD_DIR/panda_tmp/python"
 
@@ -860,7 +1659,7 @@ handle_panda_directory() {
 
 process_submodules() {
     local MOD_DIR="$1"
-    SUBMODULES=("msgq_repo" "opendbc" "rednose_repo" "panda" "tinygrad_repo" "teleoprtc_repo")
+    local SUBMODULES=("msgq_repo" "opendbc" "rednose_repo" "panda" "tinygrad_repo" "teleoprtc_repo")
 
     for SUBMODULE in "${SUBMODULES[@]}"; do
         mkdir -p "${MOD_DIR}/${SUBMODULE}_tmp"
@@ -898,8 +1697,8 @@ EOL
 }
 
 update_main_gitignore() {
-    GITIGNORE_PATH=".gitignore"
-    LINES_TO_REMOVE=(
+    local GITIGNORE_PATH=".gitignore"
+    local LINES_TO_REMOVE=(
         "*.dylib"
         "*.so"
         "selfdrive/pandad/pandad"
@@ -921,9 +1720,11 @@ update_main_gitignore() {
 }
 
 cleanup_files() {
-    local CURRENT_DIR=$(pwd)
+    local CURRENT_DIR
+    CURRENT_DIR=$(pwd)
     ensure_directory "$BUILD_DIR" || return 1
-    
+
+    # Remove compiled artifacts
     find . \( -name '*.a' -o -name '*.o' -o -name '*.os' -o -name '*.pyc' -o -name 'moc_*' -o -name '*.cc' -o -name '__pycache__' -o -name '.DS_Store' \) -exec rm -rf {} +
     rm -rf .sconsign.dblite .venv .devcontainer .idea .mypy_cache .run .vscode
     rm -f .clang-tidy .env .gitmodules .gitattributes
@@ -945,13 +1746,12 @@ cleanup_files() {
     cleanup_directory "$BUILD_DIR/third_party" "*Darwin* LICENSE README.md"
 
     cleanup_tinygrad_repo
-    
     cd "$CURRENT_DIR" || return 1
 }
 
 cleanup_directory() {
-    local dir=$1
-    local patterns=$2
+    local dir="$1"
+    local patterns="$2"
     for pattern in $patterns; do
         find "$dir/" -name "$pattern" -exec rm -rf {} +
     done
@@ -974,18 +1774,22 @@ prepare_commit_push() {
     local BUILD_BRANCH=$3
 
     if [ ! -f "$BUILD_DIR/common/version.h" ]; then
-        echo "Error: $BUILD_DIR/common/version.h not found."
+        print_error "Error: $BUILD_DIR/common/version.h not found."
         exit 1
     fi
 
+    local VERSION
     VERSION=$(date '+%Y.%m.%d')
+    local TIME_CODE
     TIME_CODE=$(date +"%H%M")
+    local GIT_HASH
     GIT_HASH=$(git rev-parse HEAD)
+    local DATETIME
     DATETIME=$(date '+%Y-%m-%dT%H:%M:%S')
-    SP_VERSION=$(cat $BUILD_DIR/common/version.h | awk -F\" '{print $2}')
+    local SP_VERSION
+    SP_VERSION=$(awk -F\" '{print $2}' "$BUILD_DIR/common/version.h")
 
     echo "#define COMMA_VERSION \"$VERSION-$TIME_CODE\"" >"$BUILD_DIR/common/version.h"
-
     create_prebuilt_marker
 
     git checkout --orphan temp_branch --quiet
@@ -995,7 +1799,7 @@ version: $COMMIT_DESC_HEADER v$SP_VERSION release
 date: $DATETIME
 master commit: $GIT_HASH
 " || {
-        echo "[-] Commit failed"
+        print_error "[-] Commit failed"
         exit 1
     }
 
@@ -1017,9 +1821,9 @@ build_cross_repo_branch() {
     local GIT_REPO_ORIGIN="$4"
     local GIT_PUBLIC_REPO_ORIGIN="$5"
 
-    # Use absolute paths and save current directory
-    local CURRENT_DIR=$(pwd)
-    
+    local CURRENT_DIR
+    CURRENT_DIR=$(pwd)
+
     rm -rf "$BUILD_DIR" "$TMP_DIR"
     git clone --single-branch --branch "$BUILD_BRANCH" "$GIT_PUBLIC_REPO_ORIGIN" "$BUILD_DIR"
     cd "$BUILD_DIR" || exit 1
@@ -1039,8 +1843,6 @@ build_cross_repo_branch() {
     cleanup_files
     create_prebuilt_marker
     prepare_commit_push "$COMMIT_DESC_HEADER" "$GIT_PUBLIC_REPO_ORIGIN" "$BUILD_BRANCH"
-    
-    # Return to original directory
     cd "$CURRENT_DIR" || exit 1
 }
 
@@ -1050,13 +1852,27 @@ build_repo_branch() {
     local COMMIT_DESC_HEADER="$3"
     local GIT_REPO_ORIGIN="$4"
 
-    # Use absolute paths and save current directory
-    local CURRENT_DIR=$(pwd)
-    
+    # Check available disk space first
+    verify_disk_space 5000 || {
+        print_error "Insufficient disk space for build operation"
+        return 1
+    }
+
+    local CURRENT_DIR
+    CURRENT_DIR=$(pwd)
+
     rm -rf "$BUILD_DIR" "$TMP_DIR"
-    git clone "$GIT_REPO_ORIGIN" -b "$CLONE_BRANCH" "$BUILD_DIR"
+    if ! git_operation_with_timeout "git clone $GIT_REPO_ORIGIN -b $CLONE_BRANCH $BUILD_DIR" 300; then
+        print_error "Failed to clone repository"
+        return 1
+    fi
+
     cd "$BUILD_DIR" || exit 1
-    git submodule update --init --recursive
+    if ! git_operation_with_timeout "git submodule update --init --recursive" 300; then
+        print_error "Failed to update submodules"
+        return 1
+    fi
+
     setup_git_env_bp
     build_openpilot_bp
     handle_panda_directory
@@ -1066,8 +1882,6 @@ build_repo_branch() {
     cleanup_files
     create_prebuilt_marker
     prepare_commit_push "$COMMIT_DESC_HEADER" "$GIT_REPO_ORIGIN" "$BUILD_BRANCH"
-    
-    # Return to original directory
     cd "$CURRENT_DIR" || exit 1
 }
 
@@ -1078,33 +1892,25 @@ clone_repo_bp() {
     local build="$4"
     local skip_reboot="${5:-no}"
 
-    # Save current directory
-    local CURRENT_DIR=$(pwd)
-    
+    local CURRENT_DIR
+    CURRENT_DIR=$(pwd)
+
     cd "/data" || exit 1
     rm -rf openpilot
-    if [[ "$branch" != *-build* ]]; then
-        git clone --depth 1 "${repo_url}" -b "${branch}" openpilot || exit 1
-        cd openpilot || exit 1
-        git submodule update --init --recursive
-    else
-        git clone --depth 1 "${repo_url}" -b "${branch}" openpilot || exit 1
-        cd openpilot || exit 1
-        git submodule update --init --recursive
-    fi
+    git clone --depth 1 "${repo_url}" -b "${branch}" openpilot || exit 1
+    cd openpilot || exit 1
+    git submodule update --init --recursive
 
     if [ "$build" == "yes" ]; then
         scons -j"$(nproc)" || exit 1
     fi
 
-    # Return to original directory if not rebooting
     if [ "$skip_reboot" == "yes" ]; then
         cd "$CURRENT_DIR" || exit 1
     else
         reboot_device
     fi
 }
-
 
 clone_public_bluepilot() {
     clone_repo_bp "the public BluePilot" "$GIT_BP_PUBLIC_REPO" "staging-DONOTUSE" "no"
@@ -1123,84 +1929,66 @@ reboot_device_bp() {
     if [[ "$confirm" =~ ^[Yy]$ ]]; then
         sudo reboot
     else
-        echo "Reboot canceled."
+        print_info "Reboot canceled."
     fi
 }
 
 choose_repository_and_branch() {
+    clear
     local action="$1"
+
+    # First, select repository.
     while true; do
         echo ""
         echo "Select Repository:"
         echo "1) BluePilotDev/bluepilot"
         echo "2) ford-op/sp-dev-c3"
         echo "3) sunnypilot/sunnypilot"
+        echo "4) commaai/openpilot"
         echo "c) Cancel"
         read -p "Enter your choice: " repo_choice
         case $repo_choice in
         1)
             REPO="bluepilotdev"
             GIT_REPO_ORIGIN="$GIT_BP_PUBLIC_REPO"
+            break
             ;;
         2)
             REPO="sp-dev-c3"
             GIT_REPO_ORIGIN="$GIT_BP_PRIVATE_REPO"
+            break
             ;;
         3)
             REPO="sunnypilot"
             GIT_REPO_ORIGIN="$GIT_SP_REPO"
+            break
             ;;
-        C | c)
+        4)
+            REPO="commaai"
+            GIT_REPO_ORIGIN="$GIT_COMMA_REPO"
+            break
+            ;;
+        [cC])
             return 1
             ;;
         *)
-            echo "Invalid choice. Please try again."
-            continue
+            print_error "Invalid choice. Please try again."
             ;;
         esac
-        break
     done
 
-    echo "[-] Fetching list of branches..."
-    REMOTE_BRANCHES=$(git ls-remote --heads "$GIT_REPO_ORIGIN" 2>&1)
-    if [ $? -ne 0 ]; then
-        echo "[-] Failed to fetch branches."
+    clear
+    # Use reusable branch selection to choose the branch.
+    if ! select_branch_menu "$GIT_REPO_ORIGIN"; then
         return 1
     fi
 
-    REMOTE_BRANCHES=$(echo "$REMOTE_BRANCHES" | awk '{print $2}' | sed 's#refs/heads/##')
+    # Set the chosen branch to both CLONE_BRANCH and (optionally) BUILD_BRANCH.
+    CLONE_BRANCH="$SELECTED_BRANCH"
+    BUILD_BRANCH="${CLONE_BRANCH}-build"
 
-    if [ "$action" = "build" ]; then
-        REMOTE_BRANCHES=$(echo "$REMOTE_BRANCHES" | grep -v -- "-build")
-    fi
-
-    readarray -t BRANCH_ARRAY <<<"$REMOTE_BRANCHES"
-
-    if [ ${#BRANCH_ARRAY[@]} -eq 0 ]; then
-        echo "[-] No branches found."
-        return 1
-    fi
-
-    echo "Available branches in $REPO:"
-    for i in "${!BRANCH_ARRAY[@]}"; do
-        printf "%d) %s\n" $((i + 1)) "${BRANCH_ARRAY[i]}"
-    done
-
-    while true; do
-        read -p "Select a branch by number (or 'c' to cancel): " branch_choice
-        if [[ "$branch_choice" == "c" || "$branch_choice" == "C" ]]; then
-            return 1
-        elif [[ "$branch_choice" =~ ^[0-9]+$ ]] && [ "$branch_choice" -ge 1 ] && [ "$branch_choice" -le "${#BRANCH_ARRAY[@]}" ]; then
-            SELECTED_BRANCH="${BRANCH_ARRAY[$((branch_choice - 1))]}"
-            CLONE_BRANCH="$SELECTED_BRANCH"
-            BUILD_BRANCH="${CLONE_BRANCH}-build"
-            echo "Selected branch: $CLONE_BRANCH"
-            echo "Build branch will be: $BUILD_BRANCH"
-            break
-        else
-            echo "Invalid choice."
-        fi
-    done
+    print_info "Selected branch: $CLONE_BRANCH"
+    print_info "Build branch will be: $BUILD_BRANCH"
     return 0
 }
 
@@ -1210,35 +1998,28 @@ clone_custom_repo() {
     fi
 
     case "$REPO" in
-    bluepilotdev)
-        GIT_REPO_URL="$GIT_BP_PUBLIC_REPO"
-        ;;
-    sp-dev-c3)
-        GIT_REPO_URL="$GIT_BP_PRIVATE_REPO"
-        ;;
-    sunnypilot)
-        GIT_REPO_URL="$GIT_SP_REPO"
-        ;;
+    bluepilotdev) GIT_REPO_URL="$GIT_BP_PUBLIC_REPO" ;;
+    sp-dev-c3) GIT_REPO_URL="$GIT_BP_PRIVATE_REPO" ;;
+    sunnypilot) GIT_REPO_URL="$GIT_SP_REPO" ;;
+    commaai) GIT_REPO_URL="$GIT_COMMA_REPO" ;;
     *)
-        echo "[-] Unknown repository: $REPO"
+        print_error "[-] Unknown repository: $REPO"
         return
         ;;
     esac
 
     clone_repo_bp "repository '$REPO' with branch '$CLONE_BRANCH'" "$GIT_REPO_URL" "$CLONE_BRANCH" "no" "yes"
-
-    # Use absolute path for openpilot directory check
     if [ ! -f "/data/openpilot/prebuilt" ]; then
-        echo "[-] No prebuilt marker found. Might need to compile."
+        print_warning "[-] No prebuilt marker found. Might need to compile."
         read -p "Compile now? (y/N): " compile_confirm
         if [[ "$compile_confirm" =~ ^[Yy]$ ]]; then
-            echo "[-] Running scons..."
+            print_info "[-] Running scons..."
             cd "/data/openpilot" || exit 1
             scons -j"$(nproc)" || {
-                echo "[-] SCons failed."
+                print_error "[-] SCons failed."
                 exit 1
             }
-            echo "[-] Compilation completed."
+            print_success "[-] Compilation completed."
         fi
     fi
 
@@ -1249,35 +2030,42 @@ custom_build_process() {
     if ! choose_repository_and_branch "build"; then
         return
     fi
-
     if [ "$REPO" = "bluepilotdev" ]; then
         GIT_REPO_ORIGIN="$GIT_BP_PUBLIC_REPO"
     elif [ "$REPO" = "sp-dev-c3" ]; then
         GIT_REPO_ORIGIN="$GIT_BP_PRIVATE_REPO"
+    elif [ "$REPO" = "sunnypilot" ]; then
+        GIT_REPO_ORIGIN="$GIT_SP_REPO"
+    elif [ "$REPO" = "commaai" ]; then
+        GIT_REPO_ORIGIN="$GIT_COMMA_REPO"
     else
-        echo "Invalid repository selected"
+        print_error "Invalid repository selected"
         return
     fi
 
     local COMMIT_DESC_HEADER="Custom Build"
     build_repo_branch "$CLONE_BRANCH" "$BUILD_BRANCH" "$COMMIT_DESC_HEADER" "$GIT_REPO_ORIGIN"
-    echo "[-] Action completed successfully"
+    print_success "[-] Action completed successfully"
 }
 
 ###############################################################################
-# Menus
+# Menu Functions (Refined Outline)
 ###############################################################################
 
 ssh_menu() {
     while true; do
         clear
         display_ssh_status
+        echo "+----------------------------------------------+"
+        echo ""
+        echo -e "${GREEN}Available Actions:${NC}"
         echo "1. Repair/Create SSH setup"
-        echo "2. Copy SSH config and keys"
-        echo "3. Reset SSH setup"
-        echo "4. Test SSH connection"
-        echo "5. View SSH key"
-        echo "6. Change Github SSH port to 443"
+        echo "2. Import SSH keys from host system"
+        echo "3. Copy SSH config and keys to persistent storage"
+        echo "4. Reset SSH setup and recreate keys"
+        echo "5. Test SSH connection"
+        echo "6. View SSH key"
+        echo "7. Change Github SSH port to 443"
         if [ -f "/home/comma/.ssh/github" ]; then
             echo "B. Backup SSH files"
         fi
@@ -1287,120 +2075,336 @@ ssh_menu() {
         echo "Q. Back to Main Menu"
         read -p "Enter your choice: " choice
         case $choice in
-        1) clear; repair_create_ssh ;;
-        2) clear; copy_ssh_config_and_keys ;;
-        3) clear; reset_ssh ;;
-        4) clear; test_ssh_connection ;;
-        5) clear; view_ssh_key ;;
-        6) clear; change_github_ssh_port ;;
-        b | B)
+        1) repair_create_ssh ;;
+        2) import_ssh_menu ;;
+        3) copy_ssh_config_and_keys ;;
+        4) reset_ssh ;;
+        5) test_ssh_connection ;;
+        6) view_ssh_key ;;
+        7) change_github_ssh_port ;;
+        [bB])
             if [ -f "/home/comma/.ssh/github" ]; then
-                backup_ssh_files
+                backup_ssh
             fi
             ;;
-        x | X)
+        [xX])
             if check_ssh_backup; then
-                restore_ssh_files
+                restore_ssh
             fi
             ;;
-        q | Q) break ;;
-        *) echo "Invalid choice." ;;
+        [qQ]) break ;;
+        *) print_error "Invalid choice." ;;
         esac
     done
 }
 
-git_menu() {
+# Combined menu function
+repo_build_and_management_menu() {
     while true; do
         clear
+        echo "+----------------------------------------------+"
+        echo "|        Repository Build & Management         |"
+        echo "+----------------------------------------------+"
         display_git_status
+        echo "+----------------------------------------------+"
+        echo ""
+        echo "Repository Operations:"
         echo "1. Fetch and pull latest changes"
-        echo "2. Change branch"
-        echo "3. Clone Openpilot Repository"
-        echo "4. Reset/Change Openpilot Repository"
-        echo "5. List available branches"
+        echo "2. Change current branch"
+        echo "3. List available branches"
+        echo "4. Reset/clean repository"
+        echo "5. Manage submodules"
+        echo ""
+        echo "Clone Operations:"
+        echo "6. Clone a specific branch"
+        echo "7. Clone BluePilot staging branch"
+        echo "8. Clone BluePilot internal dev branch"
+        echo ""
+        echo "Build Operations:"
+        echo "9. Build current branch"
+        echo "10. Build BluePilot internal dev"
+        echo "11. Build BluePilot public experimental"
+        echo "12. Custom build from any branch"
+        echo ""
+        echo "Reset Operations:"
+        echo "13. Remove and Re-clone repository"
+        echo ""
         echo "Q. Back to Main Menu"
-        read -p "Enter your choice: " choice
-        case $choice in
-        1) clear; fetch_pull_latest_changes ;;
-        2) clear; change_branch ;;
-        3) clear; clone_openpilot_repo "true" ;;
-        4) clear; reset_openpilot_repo ;;
-        5) clear; list_git_branches ;;
-        q | Q) break ;;
-        *) echo "Invalid choice." ;;
-        esac
-    done
-}
 
-bluepilot_menu() {
-    # BluePilot menu adapted from build_bluepilot logic
-    while true; do
-        clear
-        echo "****************************************"
-        echo "BluePilot Utilities"
-        echo "****************************************"
-        echo "1) Build BP Internal Dev"
-        echo "2) Build BP Public Experimental"
-        echo "3) Build Any Branch"
-        echo "4) Clone BP staging-DONOTUSE Repo"
-        echo "5) Clone bp-internal-dev-build"
-        echo "6) Clone bp-internal-dev"
-        echo "7) Clone Any Branch"
-        echo "Q) Back to Main Menu"
         read -p "Enter your choice: " choice
         case $choice in
-        1)
-            clear; build_repo_branch "bp-internal-dev" "bp-internal-dev-build" "bluepilot internal dev" "$GIT_BP_PRIVATE_REPO"
-            read -p "Press enter..."
+        1) fetch_pull_latest_changes ;;
+        2) change_branch ;;
+        3) list_git_branches ;;
+        4) reset_git_changes ;;
+        5) manage_submodules ;;
+        6) clone_openpilot_repo "true" ;;
+        7) clone_public_bluepilot ;;
+        8) clone_internal_dev ;;
+        9)
+            cd "/data/openpilot" || return
+            scons -j"$(nproc)"
+            pause_for_user
             ;;
-        2)
-            clear; build_cross_repo_branch "bp-public-experimental" "staging-DONOTUSE" "bluepilot experimental" "$GIT_BP_PRIVATE_REPO" "$GIT_BP_PUBLIC_REPO"
-            read -p "Press enter..."
+        10)
+            build_repo_branch "bp-internal-dev" "bp-internal-dev-build" "bluepilot internal dev" "$GIT_BP_PRIVATE_REPO"
+            pause_for_user
             ;;
-        3)
-            clear; custom_build_process
-            read -p "Press enter..."
+        11)
+            build_cross_repo_branch "bp-public-experimental" "staging-DONOTUSE" "bluepilot experimental" "$GIT_BP_PRIVATE_REPO" "$GIT_BP_PUBLIC_REPO"
+            pause_for_user
             ;;
-        4)
-            clear; clone_public_bluepilot
-            read -p "Press enter..."
+        12)
+            custom_build_process
+            pause_for_user
             ;;
-        5)
-            clear; clone_internal_dev_build
-            read -p "Press enter..."
-            ;;
-        6)
-            clear; clone_internal_dev
-            read -p "Press enter..."
-            ;;
-        7)
-            clear; clone_custom_repo
-            read -p "Press enter..."
-            ;;
-        q | Q) break ;;
-        *) echo "Invalid choice." ;;
+        13) reset_openpilot_repo ;;
+        [qQ]) break ;;
+        *) print_error "Invalid choice." ;;
         esac
     done
 }
 
 ###############################################################################
-# Argument Parsing (from build_bluepilot)
+# Issue Detection Functions
 ###############################################################################
 
-# Attempt to parse arguments before showing menus
-# Updated argument parsing with all functionality
-if [ $# -gt 0 ]; then
-    TEMP=$(getopt -o h --long build-dev,build-public,custom-build,repo:,clone-branch:,build-branch:,clone-public-bp,clone-internal-dev-build,clone-internal-dev,custom-clone,update,reboot,shutdown,view-logs,test-ssh,backup-ssh,restore-ssh,reset-ssh,git-pull,git-status,git-branch:,help -n 'CommaUtility.sh' -- "$@")
+detect_issues() {
+    ISSUE_FIXES=()
+    ISSUE_DESCRIPTIONS=()
+    ISSUE_PRIORITIES=()
+    local issues_found=0
 
-    if [ $? != 0 ]; then
-        echo "Terminating..." >&2
-        exit 1
+    # SSH Status Checks
+    local home_ssh_exists=false
+    local usr_ssh_exists=false
+    local backup_exists=false
+
+    [ -f "/home/comma/.ssh/github" ] && home_ssh_exists=true
+    [ -f "/usr/default/home/comma/.ssh/github" ] && usr_ssh_exists=true
+    check_ssh_backup && backup_exists=true
+
+    # Scenario 1: Missing from both locations
+    if [ "$home_ssh_exists" = false ] && [ "$usr_ssh_exists" = false ]; then
+        issues_found=$((issues_found + 1))
+        if [ "$backup_exists" = true ]; then
+            ISSUE_FIXES[$issues_found]="restore_ssh"
+            ISSUE_DESCRIPTIONS[$issues_found]="SSH keys missing from all locations - Backup available for restore"
+            ISSUE_PRIORITIES[$issues_found]=1
+        else
+            ISSUE_FIXES[$issues_found]="repair_create_ssh"
+            ISSUE_DESCRIPTIONS[$issues_found]="SSH keys missing from all locations - New setup required"
+            ISSUE_PRIORITIES[$issues_found]=1
+        fi
     fi
 
-    eval set -- "$TEMP"
+    # Scenario 2: Missing from home but exists in persistent storage
+    if [ "$home_ssh_exists" = false ] && [ "$usr_ssh_exists" = true ]; then
+        issues_found=$((issues_found + 1))
+        ISSUE_FIXES[$issues_found]="repair_create_ssh"
+        ISSUE_DESCRIPTIONS[$issues_found]="SSH keys missing from /home/comma/.ssh/ but available in persistent storage"
+        ISSUE_PRIORITIES[$issues_found]=1
+    fi
 
-    while true; do
+    # Scenario 3: Missing from persistent but exists in home
+    if [ "$home_ssh_exists" = true ] && [ "$usr_ssh_exists" = false ]; then
+        issues_found=$((issues_found + 1))
+        ISSUE_FIXES[$issues_found]="copy_ssh_config_and_keys"
+        ISSUE_DESCRIPTIONS[$issues_found]="SSH keys not synchronized to persistent storage"
+        ISSUE_PRIORITIES[$issues_found]=2
+    fi
+
+    # Permission checks (only if files exist)
+    if [ "$home_ssh_exists" = true ]; then
+        check_file_permissions_owner "/home/comma/.ssh/github" "-rw-------" "comma"
+        local home_perm_check=$?
+        if [ "$home_perm_check" -eq 1 ]; then
+            issues_found=$((issues_found + 1))
+            ISSUE_FIXES[$issues_found]="repair_create_ssh"
+            ISSUE_DESCRIPTIONS[$issues_found]="SSH key permissions/ownership incorrect in home directory"
+            ISSUE_PRIORITIES[$issues_found]=2
+        fi
+    fi
+
+    if [ "$usr_ssh_exists" = true ]; then
+        check_file_permissions_owner "/usr/default/home/comma/.ssh/github" "-rw-------" "comma"
+        local usr_perm_check=$?
+        if [ "$usr_perm_check" -eq 1 ]; then
+            issues_found=$((issues_found + 1))
+            ISSUE_FIXES[$issues_found]="repair_create_ssh"
+            ISSUE_DESCRIPTIONS[$issues_found]="SSH key permissions/ownership incorrect in persistent storage"
+            ISSUE_PRIORITIES[$issues_found]=2
+        fi
+    fi
+
+    # Backup recommendations
+    if [ "$home_ssh_exists" = true ] && [ "$backup_exists" = false ]; then
+        issues_found=$((issues_found + 1))
+        ISSUE_FIXES[$issues_found]="backup_ssh"
+        ISSUE_DESCRIPTIONS[$issues_found]="No SSH backup found - Backup recommended"
+        ISSUE_PRIORITIES[$issues_found]=3
+    fi
+
+    # Check backup age if it exists
+    if [ "$backup_exists" = true ] && [ -f "/data/ssh_backup/metadata.txt" ]; then
+        local backup_date
+        backup_date=$(grep "Backup Date:" /data/ssh_backup/metadata.txt | cut -d: -f2- | xargs)
+        if [ -n "$backup_date" ]; then
+            local backup_age
+            local backup_days
+            backup_age=$(($(date +%s) - $(date -d "$backup_date" +%s)))
+            backup_days=$((backup_age / 86400))
+            if [ "$backup_days" -gt 30 ]; then
+                issues_found=$((issues_found + 1))
+                ISSUE_FIXES[$issues_found]="backup_ssh"
+                ISSUE_DESCRIPTIONS[$issues_found]="SSH backup is $backup_days days old - Consider updating"
+                ISSUE_PRIORITIES[$issues_found]=3
+            fi
+        fi
+    fi
+}
+
+###############################################################################
+# Main Menu & Argument Handling
+###############################################################################
+
+display_main_menu() {
+    clear
+    echo "+----------------------------------------------+"
+    echo "|       CommaUtility Script v$SCRIPT_VERSION"
+    echo "|       (Last Modified: $SCRIPT_MODIFIED)"
+    echo "+----------------------------------------------+"
+
+    # Display System Status
+    # echo "| System Status:"
+    display_os_info_short
+    display_git_status_short
+    display_disk_space_short
+    display_ssh_status_short
+
+    # Detect and categorize issues
+    detect_issues
+
+    # Display Critical Issues
+    local critical_found=false
+    for i in "${!ISSUE_PRIORITIES[@]}"; do
+        if [ "${ISSUE_PRIORITIES[$i]}" -eq 1 ]; then
+            if [ "$critical_found" = false ]; then
+                echo "|----------------------------------------------|"
+                echo -e "| ${RED}Critical Issues:${NC}"
+                critical_found=true
+            fi
+            echo -e "| ❌ ${ISSUE_DESCRIPTIONS[$i]}"
+        fi
+    done
+
+    # Display Warnings
+    local warnings_found=false
+    for i in "${!ISSUE_PRIORITIES[@]}"; do
+        if [ "${ISSUE_PRIORITIES[$i]}" -eq 2 ]; then
+            if [ "$warnings_found" = false ]; then
+                echo "|----------------------------------------------|"
+                echo -e "| ${YELLOW}Warnings:${NC}"
+                warnings_found=true
+            fi
+            echo -e "| ⚠️  ${ISSUE_DESCRIPTIONS[$i]}"
+        fi
+    done
+
+    # Display Recommendations
+    local recommendations_found=false
+    for i in "${!ISSUE_PRIORITIES[@]}"; do
+        if [ "${ISSUE_PRIORITIES[$i]}" -eq 3 ]; then
+            if [ "$recommendations_found" = false ]; then
+                echo "|----------------------------------------------|"
+                echo -e "| ${BLUE}Recommendations:${NC}"
+                recommendations_found=true
+            fi
+            echo -e "| → ${ISSUE_DESCRIPTIONS[$i]}"
+        fi
+    done
+
+    # Close with a consistent bottom divider
+    echo "+----------------------------------------------+"
+
+    # Display Main Menu Options
+    echo -e "\n${GREEN}Available Actions:${NC}"
+    echo "1. SSH Setup"
+    echo "2. Repository & Build Tools"
+    echo "3. View Logs"
+    echo "4. View Recent Error"
+
+    # Dynamic fix options
+    local fix_number=5 # Start from 5 because we already have 4 options
+    for i in "${!ISSUE_FIXES[@]}"; do
+        local color=""
+        case "${ISSUE_PRIORITIES[$i]}" in
+        1) color="$RED" ;;
+        2) color="$YELLOW" ;;
+        3) color="$BLUE" ;;
+        *) color="$NC" ;;
+        esac
+        echo -e "${fix_number}. ${color}Fix: ${ISSUE_DESCRIPTIONS[$i]}${NC}"
+        fix_number=$((fix_number + 1))
+    done
+
+    echo "R. Reboot Device"
+    echo "S. Shutdown Device"
+    echo "U. Update Script"
+    echo "Q. Exit"
+}
+
+handle_main_menu_input() {
+    read -p "Enter your choice: " main_choice
+    case $main_choice in
+    1) ssh_menu ;;
+    2) repo_build_and_management_menu ;;
+    3) display_logs ;;
+    4) view_error_log ;;
+
+    [5-9] | [1-9][0-9])
+        # Calculate array index by adjusting for the 4 standard menu items
+        local fix_index=$((main_choice - 4))
+        if [ -n "${ISSUE_FIXES[$fix_index]}" ]; then
+            ${ISSUE_FIXES[$fix_index]}
+        else
+            print_error "Invalid option"
+        fi
+        ;;
+    [uU]) update_script ;;
+    [rR]) reboot_device ;;
+    [sS]) shutdown_device ;;
+    [qQ])
+        print_info "Exiting..."
+        exit 0
+        ;;
+    *)
+        print_error "Invalid choice."
+        # pause_for_user
+        ;;
+    esac
+}
+
+###############################################################################
+# Parse Command Line Arguments
+###############################################################################
+
+# Parse Command Line Arguments
+parse_arguments() {
+    while [ $# -gt 0 ]; do
         case "$1" in
+        --import-ssh)
+            SCRIPT_ACTION="import-ssh"
+            shift
+            ;;
+        --private-key-file)
+            PRIVATE_KEY_FILE="$2"
+            shift 2
+            ;;
+        --public-key-file)
+            PUBLIC_KEY_FILE="$2"
+            shift 2
+            ;;
         # Build operations
         --build-dev)
             SCRIPT_ACTION="build-dev"
@@ -1426,7 +2430,6 @@ if [ $# -gt 0 ]; then
             BUILD_BRANCH="$2"
             shift 2
             ;;
-
         # Clone operations
         --clone-public-bp)
             SCRIPT_ACTION="clone-public-bp"
@@ -1444,7 +2447,6 @@ if [ $# -gt 0 ]; then
             SCRIPT_ACTION="custom-clone"
             shift
             ;;
-
         # System operations
         --update)
             SCRIPT_ACTION="update"
@@ -1462,7 +2464,6 @@ if [ $# -gt 0 ]; then
             SCRIPT_ACTION="view-logs"
             shift
             ;;
-
         # SSH operations
         --test-ssh)
             SCRIPT_ACTION="test-ssh"
@@ -1480,7 +2481,6 @@ if [ $# -gt 0 ]; then
             SCRIPT_ACTION="reset-ssh"
             shift
             ;;
-
         # Git operations
         --git-pull)
             SCRIPT_ACTION="git-pull"
@@ -1495,88 +2495,35 @@ if [ $# -gt 0 ]; then
             NEW_BRANCH="$2"
             shift 2
             ;;
-
-        # Help
         -h | --help)
             show_help
             exit 0
             ;;
-        --)
-            shift
-            break
-            ;;
         *)
-            echo "Internal error!"
+            echo "Unknown option: $1"
+            show_help
             exit 1
             ;;
         esac
     done
+}
+
+# Only parse arguments if any were provided
+if [ $# -gt 0 ]; then
+    parse_arguments "$@"
 fi
 
-###############################################################################
-# Main (If SCRIPT_ACTION is set by arguments, run that directly)
-###############################################################################
-
 main() {
+    if [ -z "$SCRIPT_ACTION" ]; then
+        check_for_updates
+    fi
+
     while true; do
         if [ -z "$SCRIPT_ACTION" ]; then
-            # No arguments provided or no action set by arguments: show main menu
-            check_for_updates
-
-            # SSH Configuration Check
-            if ! check_ssh_config_completeness; then
-                echo "+----------------------------------------------+"
-                echo "|      SSH Configuration Change Available      |"
-                echo "+----------------------------------------------+"
-                read -p "Would you like to automatically update your SSH configuration to use port 443 for Github SSH requests? (y/N): " ssh_fix_choice
-                if [[ "$ssh_fix_choice" =~ ^[Yy]$ ]]; then
-                    change_github_ssh_port
-                    echo "SSH configuration updated successfully."
-                    read -p "Press enter to continue..."
-                fi
-            fi
-
-            while true; do
-                clear
-                check_root_space
-                echo "+----------------------------------------------+"
-                echo "|      CommaUtility Script v$SCRIPT_VERSION"
-                echo "|        (Last Modified: $SCRIPT_MODIFIED)"
-                echo "+----------------------------------------------+"
-                display_ssh_status_short
-                display_git_status_short
-                display_general_status_short
-                display_disk_space_short
-                echo "----------------------------------------------"
-                echo ""
-                echo "1. SSH Setup"
-                echo "2. Openpilot Folder Tools"
-                echo "3. BluePilot Utilities"
-                echo "4. View Logs"
-                echo "5. View Recent Error"
-                echo "6. Reboot Device"
-                echo "7. Shutdown Device"
-                echo "U. Update Script"
-                echo "Q. Exit"
-                read -p "Enter your choice: " main_choice
-                case $main_choice in
-                1) ssh_menu ;;
-                2) git_menu ;;
-                3) bluepilot_menu ;;
-                4) display_logs ;;
-                5) view_error_log ;;
-                6) reboot_device ;;
-                7) shutdown_device ;;
-                u | U) update_script ;;
-                q | Q)
-                    echo "Exiting..."
-                    exit 0
-                    ;;
-                *)
-                    echo "Invalid choice."
-                    ;;
-                esac
-            done
+            # No arguments or no action set by arguments: show main menu
+            check_prerequisites
+            display_main_menu
+            handle_main_menu_input
         else
             # SCRIPT_ACTION is set from arguments, run corresponding logic
             case "$SCRIPT_ACTION" in
@@ -1597,117 +2544,84 @@ main() {
                 ;;
             custom-clone)
                 if [ -z "$REPO" ] || [ -z "$CLONE_BRANCH" ]; then
-                    echo "Error: --custom-clone requires --repo and --clone-branch parameters."
+                    print_error "Error: --custom-clone requires --repo and --clone-branch parameters."
                     show_help
                     exit 1
                 fi
-                # Perform custom clone with provided parameters directly
                 case "$REPO" in
-                bluepilotdev)
-                    GIT_REPO_URL="$GIT_BP_PUBLIC_REPO"
-                    ;;
-                sp-dev-c3)
-                    GIT_REPO_URL="$GIT_BP_PRIVATE_REPO"
-                    ;;
-                sunnypilot)
-                    GIT_REPO_URL="$GIT_SP_REPO"
-                    ;;
+                bluepilotdev) GIT_REPO_URL="$GIT_BP_PUBLIC_REPO" ;;
+                sp-dev-c3) GIT_REPO_URL="$GIT_BP_PRIVATE_REPO" ;;
+                sunnypilot) GIT_REPO_URL="$GIT_SP_REPO" ;;
+                commaai) GIT_REPO_URL="$GIT_COMMA_REPO" ;;
                 *)
-                    echo "[-] Unknown repository: $REPO"
+                    print_error "[-] Unknown repository: $REPO"
                     exit 1
                     ;;
                 esac
                 clone_repo_bp "repository '$REPO' with branch '$CLONE_BRANCH'" "$GIT_REPO_URL" "$CLONE_BRANCH" "no" "yes"
                 if [ ! -f "/data/openpilot/prebuilt" ]; then
-                    echo "[-] No prebuilt marker found. Might need to compile."
+                    print_warning "[-] No prebuilt marker found. Might need to compile."
                     read -p "Compile now? (y/N): " compile_confirm
                     if [[ "$compile_confirm" =~ ^[Yy]$ ]]; then
-                        echo "[-] Running scons..."
+                        print_info "[-] Running scons..."
                         cd /data/openpilot
                         scons -j"$(nproc)" || {
-                            echo "[-] SCons failed."
+                            print_error "[-] SCons failed."
                             exit 1
                         }
-                        echo "[-] Compilation completed."
+                        print_success "[-] Compilation completed."
                     fi
                 fi
                 reboot_device_bp
                 ;;
             custom-build)
                 if [ -z "$REPO" ] || [ -z "$CLONE_BRANCH" ] || [ -z "$BUILD_BRANCH" ]; then
-                    echo "Error: --custom-build requires --repo, --clone-branch, and --build-branch parameters."
+                    print_error "Error: --custom-build requires --repo, --clone-branch, and --build-branch."
                     show_help
                     exit 1
                 fi
-
-                if [ "$REPO" = "bluepilotdev" ]; then
-                    GIT_REPO_ORIGIN="$GIT_BP_PUBLIC_REPO"
-                elif [ "$REPO" = "sp-dev-c3" ]; then
-                    GIT_REPO_ORIGIN="$GIT_BP_PRIVATE_REPO"
-                else
-                    echo "Invalid repository selected"
+                case "$REPO" in
+                bluepilotdev) GIT_REPO_URL="$GIT_BP_PUBLIC_REPO" ;;
+                sp-dev-c3) GIT_REPO_URL="$GIT_BP_PRIVATE_REPO" ;;
+                sunnypilot) GIT_REPO_URL="$GIT_SP_REPO" ;;
+                commaai) GIT_REPO_URL="$GIT_COMMA_REPO" ;;
+                *)
+                    print_error "[-] Unknown repository: $REPO"
                     exit 1
-                fi
-
-                COMMIT_DESC_HEADER="Custom Build"
+                    ;;
+                esac
+                local COMMIT_DESC_HEADER="Custom Build"
                 build_repo_branch "$CLONE_BRANCH" "$BUILD_BRANCH" "$COMMIT_DESC_HEADER" "$GIT_REPO_ORIGIN"
-                echo "[-] Action completed successfully"
+                print_success "[-] Action completed successfully"
                 ;;
-
-                # System operations
-            update)
-                update_script
-                ;;
-            reboot)
-                reboot_device
-                ;;
-            shutdown)
-                shutdown_device
-                ;;
-            view-logs)
-                display_logs
-                ;;
-
-            # SSH operations
-            test-ssh)
-                test_ssh_connection
-                ;;
-            backup-ssh)
-                backup_ssh_files
-                ;;
-            restore-ssh)
-                restore_ssh_files
-                ;;
-            reset-ssh)
-                reset_ssh
-                ;;
-
-            # Git operations
-            git-pull)
-                fetch_pull_latest_changes
-                ;;
-            git-status)
-                display_git_status
-                ;;
+            update) update_script ;;
+            reboot) reboot_device ;;
+            shutdown) shutdown_device ;;
+            view-logs) display_logs ;;
+            test-ssh) test_ssh_connection ;;
+            backup-ssh) backup_ssh ;;
+            restore-ssh) restore_ssh ;;
+            reset-ssh) reset_ssh ;;
+            import-ssh) import_ssh_keys $PRIVATE_KEY_FILE $PUBLIC_KEY_FILE ;;
+            git-pull) fetch_pull_latest_changes ;;
+            git-status) display_git_status ;;
             git-branch)
                 if [ -n "$NEW_BRANCH" ]; then
                     cd /data/openpilot && git checkout "$NEW_BRANCH"
                 else
-                    echo "Error: Branch name required"
+                    print_error "Error: Branch name required"
                     exit 1
                 fi
                 ;;
             *)
-                echo "Invalid build type. Exiting."
+                print_error "Invalid build type. Exiting."
                 exit 1
                 ;;
             esac
-
-            # After completing the action, exit since it's argument driven
             exit 0
         fi
     done
 }
 
-# Run main
+# Start the script
 main
