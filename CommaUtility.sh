@@ -14,8 +14,8 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly SCRIPT_VERSION="2.1.0"
-readonly SCRIPT_MODIFIED="2025-01-13"
+readonly SCRIPT_VERSION="2.2.0"
+readonly SCRIPT_MODIFIED="2025-01-14"
 
 # We unify color-coded messages in a single block for consistency:
 readonly RED='\033[0;31m'
@@ -218,6 +218,10 @@ restore_ssh() {
 
             # Ensure persistent storage is updated
             copy_ssh_config_and_keys
+
+            # Restart SSH agent
+            restart_ssh_agent
+
             print_success "SSH files restored successfully."
         else
             print_info "Restore cancelled."
@@ -226,6 +230,26 @@ restore_ssh() {
         print_warning "No valid SSH backup found to restore."
     fi
     pause_for_user
+}
+
+restart_ssh_agent() {
+    print_info "Restarting SSH agent..."
+    # Kill existing SSH agent if running
+    if [ -n "$SSH_AGENT_PID" ]; then
+        kill -9 "$SSH_AGENT_PID" 2>/dev/null
+    fi
+    pkill -f ssh-agent
+
+    # Start new SSH agent
+    eval "$(ssh-agent -s)"
+
+    # Add the SSH key if it exists
+    if [ -f "/home/comma/.ssh/github" ]; then
+        ssh-add /home/comma/.ssh/github
+        print_success "SSH agent restarted and key added."
+    else
+        print_warning "SSH agent restarted but no key found to add."
+    fi
 }
 
 # Check disk usage and resize root if needed
@@ -646,7 +670,7 @@ reset_ssh() {
     create_ssh_config
     generate_ssh_key
     copy_ssh_config_and_keys
-    backup_ssh
+    restart_ssh_agent
     test_ssh_connection
     print_info "Creating backup of new SSH setup..."
     backup_ssh
@@ -717,6 +741,9 @@ import_ssh_keys() {
 
     # Create backup
     backup_ssh
+
+    # Restart SSH agent
+    restart_ssh_agent
 
     # Test connection
     test_ssh_connection
@@ -1376,6 +1403,16 @@ view_error_log() {
     print_info "Displaying error log at /data/community/crashes/error.txt:"
     cat /data/community/crashes/error.txt 2>/dev/null || print_warning "No error log found."
     pause_for_user
+}
+
+turn_off_screen() {
+    print_info "Turning off the screen..."
+    echo 1 >/sys/class/backlight/panel0-backlight/bl_power
+}
+
+turn_on_screen() {
+    print_info "Turning on the screen..."
+    echo 0 >/sys/class/backlight/panel0-backlight/bl_power
 }
 
 reboot_device() {
@@ -2265,8 +2302,178 @@ detect_issues() {
 }
 
 ###############################################################################
-# System Statistics Menu
+# Device Control Functions
 ###############################################################################
+
+manage_wifi_networks() {
+    clear
+    echo "+----------------------------------------------+"
+    echo "|           WiFi Network Management            |"
+    echo "+----------------------------------------------+"
+
+    # Check if nmcli is available
+    if ! command -v nmcli >/dev/null 2>&1; then
+        print_error "Network Manager (nmcli) not found."
+        pause_for_user
+        return 1
+    fi
+
+    # Show current connection status
+    echo "Current Connection:"
+    nmcli -t -f DEVICE,CONNECTION dev status | grep wifi | while IFS=: read -r dev conn; do
+        if [ "$conn" != "--" ]; then
+            echo "Connected to: $conn"
+        else
+            echo "Not connected"
+        fi
+    done
+    echo ""
+
+    # Scan for networks
+    print_info "Scanning for networks..."
+    nmcli dev wifi rescan
+    echo "Available Networks:"
+    nmcli -f SSID,SIGNAL,SECURITY dev wifi list | sort -k2 -nr | head -n 10
+
+    echo ""
+    echo "Options:"
+    echo "1. Connect to network"
+    echo "2. Disconnect current network"
+    echo "3. Enable WiFi"
+    echo "4. Disable WiFi"
+    echo "Q. Back to Device Controls"
+
+    read -p "Enter your choice: " wifi_choice
+    case $wifi_choice in
+    1)
+        read -p "Enter SSID to connect to: " ssid
+        read -s -p "Enter password: " password
+        echo ""
+        nmcli dev wifi connect "$ssid" password "$password"
+        ;;
+    2)
+        nmcli dev disconnect wlan0
+        ;;
+    3)
+        nmcli radio wifi on
+        ;;
+    4)
+        nmcli radio wifi off
+        ;;
+    [qQ])
+        return
+        ;;
+    *)
+        print_error "Invalid choice."
+        ;;
+    esac
+    pause_for_user
+}
+
+restart_cellular_radio() {
+    clear
+    print_info "Restarting cellular radio..."
+
+    # Check if ModemManager is available
+    if ! command -v mmcli >/dev/null 2>&1; then
+        print_error "ModemManager not found."
+        pause_for_user
+        return 1
+    fi
+
+    # Get modem index
+    local modem_index
+    modem_index=$(mmcli -L | grep -o '[0-9]*' | head -1)
+
+    if [ -n "$modem_index" ]; then
+        print_info "Disabling modem..."
+        mmcli -m "$modem_index" -d
+        sleep 2
+        print_info "Enabling modem..."
+        mmcli -m "$modem_index" -e
+        print_success "Cellular radio restart completed."
+    else
+        print_error "No modem found."
+    fi
+    pause_for_user
+}
+
+manage_bluetooth() {
+    clear
+    echo "+----------------------------------------------+"
+    echo "|           Bluetooth Management               |"
+    echo "+----------------------------------------------+"
+
+    # Check if bluetoothctl is available
+    if ! command -v bluetoothctl >/dev/null 2>&1; then
+        print_error "Bluetooth control (bluetoothctl) not found."
+        pause_for_user
+        return 1
+    fi
+
+    echo "Current Status:"
+    bluetoothctl show | grep "Powered:"
+
+    echo ""
+    echo "Options:"
+    echo "1. Turn Bluetooth On"
+    echo "2. Turn Bluetooth Off"
+    echo "3. Show Paired Devices"
+    echo "4. Scan for Devices"
+    echo "Q. Back to Device Controls"
+
+    read -p "Enter your choice: " bt_choice
+    case $bt_choice in
+    1)
+        bluetoothctl power on
+        ;;
+    2)
+        bluetoothctl power off
+        ;;
+    3)
+        bluetoothctl paired-devices
+        ;;
+    4)
+        print_info "Scanning for devices (10 seconds)..."
+        bluetoothctl scan on &
+        sleep 10
+        bluetoothctl scan off
+        ;;
+    [qQ])
+        return
+        ;;
+    *)
+        print_error "Invalid choice."
+        ;;
+    esac
+    pause_for_user
+}
+
+device_controls_menu() {
+    while true; do
+        clear
+        echo "+----------------------------------------------+"
+        echo "|           Device Controls                    |"
+        echo "+----------------------------------------------+"
+        echo "1. WiFi Network Management"
+        echo "2. Restart Cellular Radio"
+        echo "3. Bluetooth Management"
+        echo "4. Turn Screen Off"
+        echo "5. Turn Screen On"
+        echo "Q. Back to Main Menu"
+
+        read -p "Enter your choice: " control_choice
+        case $control_choice in
+        1) manage_wifi_networks ;;
+        2) restart_cellular_radio ;;
+        3) manage_bluetooth ;;
+        4) turn_off_screen ;;
+        5) turn_on_screen ;;
+        [qQ]) break ;;
+        *) print_error "Invalid choice." ;;
+        esac
+    done
+}
 
 ###############################################################################
 # System Statistics Functions
@@ -2459,9 +2666,10 @@ display_main_menu() {
     echo "3. View Logs"
     echo "4. View Recent Error"
     echo "5. System Statistics"
+    echo "6. Device Controls"
 
     # Dynamic fix options
-    local fix_number=6 # Start from 6 because we already have 5 options
+    local fix_number=7 # Start from 6 because we already have 5 options
     for i in "${!ISSUE_FIXES[@]}"; do
         local color=""
         case "${ISSUE_PRIORITIES[$i]}" in
@@ -2488,9 +2696,10 @@ handle_main_menu_input() {
     3) display_logs ;;
     4) view_error_log ;;
     5) system_statistics_menu ;;
-    [6-9] | [1-9][0-9])
+    6) device_controls_menu ;;
+    [7-9] | [1-9][0-9])
         # Calculate array index by adjusting for the 4 standard menu items
-        local fix_index=$((main_choice - 5))
+        local fix_index=$((main_choice - 6))
         if [ -n "${ISSUE_FIXES[$fix_index]}" ]; then
             ${ISSUE_FIXES[$fix_index]}
         else
