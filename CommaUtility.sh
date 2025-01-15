@@ -14,7 +14,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly SCRIPT_VERSION="2.2.1"
+readonly SCRIPT_VERSION="2.2.2"
 readonly SCRIPT_MODIFIED="2025-01-16"
 
 # We unify color-coded messages in a single block for consistency:
@@ -541,17 +541,14 @@ test_ssh_connection() {
         return 1
     fi
 
-    # Use timeout to prevent hanging
-    if ! result=$(timeout 10 ssh -T git@github.com 2>&1); then
-        connection_status=$?
-        if [ $connection_status -eq 124 ]; then
-            print_error "SSH connection test timed out"
-            pause_for_user
-            return 1
-        fi
-    fi
+    # Create known_hosts directory if it doesn't exist
+    # mkdir -p /home/comma/.ssh
+    touch /home/comma/.ssh/known_hosts
 
-    if echo "$result" | grep -q "You've successfully authenticated"; then
+    # Use yes to automatically accept the host key and pipe to ssh
+    result=$(yes yes | ssh -o StrictHostKeyChecking=accept-new -T git@github.com 2>&1)
+
+    if echo "$result" | grep -q "successfully authenticated"; then
         print_success "SSH connection test successful."
 
         # Update metadata file with test date
@@ -625,7 +622,7 @@ repair_create_ssh() {
     [ -f "/usr/default/home/comma/.ssh/github" ] && usr_ssh_exists=true
 
     # Check/update known_hosts early in the process
-    check_github_known_hosts
+    # check_github_known_hosts
 
     # If SSH exists in persistent location but not in home
     if [ "$usr_ssh_exists" = true ] && [ "$home_ssh_exists" = false ]; then
@@ -2177,15 +2174,16 @@ repo_build_and_management_menu() {
         echo "5. Manage submodules"
         echo ""
         echo "Clone Operations:"
-        echo "6. Clone a specific branch"
-        echo "7. Clone BluePilot staging branch"
-        echo "8. Clone BluePilot internal dev branch"
+        echo "6. Clone a branch by name"
+        echo "7. Clone a repository and branch from list"
+        echo "8. Clone BluePilot public branch"
+        echo "9. Clone BluePilot internal dev branch"
         echo ""
         echo "Build Operations:"
-        echo "9. Run SCONS on current branch"
-        echo "10. Build BluePilot internal dev"
-        echo "11. Build BluePilot public experimental"
-        echo "12. Custom build from any branch"
+        echo "10. Run SCONS on current branch"
+        echo "11. Build BluePilot internal dev"
+        echo "12. Build BluePilot public experimental"
+        echo "13. Custom build from any branch"
         echo ""
         echo "Reset Operations:"
         echo "13. Remove and Re-clone repository"
@@ -2200,14 +2198,15 @@ repo_build_and_management_menu() {
         4) reset_git_changes ;;
         5) manage_submodules ;;
         6) clone_openpilot_repo "true" ;;
-        7) clone_public_bluepilot ;;
-        8) clone_internal_dev ;;
-        9)
+        7) clone_custom_repo ;;
+        8) clone_public_bluepilot ;;
+        9) clone_internal_dev ;;
+        10)
             cd "/data/openpilot" || return
             scons -j"$(nproc)"
             pause_for_user
             ;;
-        10)
+        11)
             build_repo_branch "bp-internal-dev" "bp-internal-dev-build" "bluepilot internal dev" "$GIT_BP_PRIVATE_REPO"
             pause_for_user
             ;;
@@ -2307,19 +2306,19 @@ detect_issues() {
     fi
 
     # Check for GitHub's host key in known_hosts
-    if [ -f "/home/comma/.ssh/known_hosts" ]; then
-        if ! grep -q "ssh.github.com" "/home/comma/.ssh/known_hosts"; then
-            issues_found=$((issues_found + 1))
-            ISSUE_FIXES[$issues_found]="check_github_known_hosts"
-            ISSUE_DESCRIPTIONS[$issues_found]="GitHub's host key not found in known_hosts"
-            ISSUE_PRIORITIES[$issues_found]=2
-        fi
-    else
-        issues_found=$((issues_found + 1))
-        ISSUE_FIXES[$issues_found]="check_github_known_hosts"
-        ISSUE_DESCRIPTIONS[$issues_found]="SSH known_hosts file missing"
-        ISSUE_PRIORITIES[$issues_found]=2
-    fi
+    # if [ -f "/home/comma/.ssh/known_hosts" ]; then
+    #     if ! grep -q "ssh.github.com" "/home/comma/.ssh/known_hosts"; then
+    #         issues_found=$((issues_found + 1))
+    #         ISSUE_FIXES[$issues_found]="check_github_known_hosts"
+    #         ISSUE_DESCRIPTIONS[$issues_found]="GitHub's host key not found in known_hosts"
+    #         ISSUE_PRIORITIES[$issues_found]=2
+    #     fi
+    # else
+    #     issues_found=$((issues_found + 1))
+    #     ISSUE_FIXES[$issues_found]="check_github_known_hosts"
+    #     ISSUE_DESCRIPTIONS[$issues_found]="SSH known_hosts file missing"
+    #     ISSUE_PRIORITIES[$issues_found]=2
+    # fi
 
     # Check backup age if it exists
     if [ "$backup_exists" = true ] && [ -f "/data/ssh_backup/metadata.txt" ]; then
