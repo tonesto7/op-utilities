@@ -2158,7 +2158,7 @@ repo_build_and_management_menu() {
         echo "8. Clone BluePilot internal dev branch"
         echo ""
         echo "Build Operations:"
-        echo "9. Build current branch"
+        echo "9. Run SCONS on current branch"
         echo "10. Build BluePilot internal dev"
         echo "11. Build BluePilot public experimental"
         echo "12. Custom build from any branch"
