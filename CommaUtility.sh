@@ -14,8 +14,8 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly SCRIPT_VERSION="2.2.0"
-readonly SCRIPT_MODIFIED="2025-01-14"
+readonly SCRIPT_VERSION="2.2.1"
+readonly SCRIPT_MODIFIED="2025-01-16"
 
 # We unify color-coded messages in a single block for consistency:
 readonly RED='\033[0;31m'
@@ -582,6 +582,27 @@ EOF
     pause_for_user
 }
 
+check_github_known_hosts() {
+    local known_hosts="/home/comma/.ssh/known_hosts"
+
+    # Create known_hosts if it doesn't exist
+    if [ ! -f "$known_hosts" ]; then
+        mkdir -p /home/comma/.ssh
+        touch "$known_hosts"
+        chown comma:comma "$known_hosts"
+        chmod 644 "$known_hosts"
+    fi
+
+    # Check if GitHub's key is already in known_hosts
+    if ! grep -q "ssh.github.com" "$known_hosts"; then
+        print_info "Adding GitHub's host key..."
+        ssh-keyscan -p 443 ssh.github.com >>"$known_hosts" 2>/dev/null
+        chown comma:comma "$known_hosts"
+        return 1
+    fi
+    return 0
+}
+
 generate_ssh_key() {
     if [ ! -f /home/comma/.ssh/github ]; then
         ssh-keygen -t ed25519 -f /home/comma/.ssh/github
@@ -602,6 +623,9 @@ repair_create_ssh() {
     # Check existence in both locations
     [ -f "/home/comma/.ssh/github" ] && home_ssh_exists=true
     [ -f "/usr/default/home/comma/.ssh/github" ] && usr_ssh_exists=true
+
+    # Check/update known_hosts early in the process
+    check_github_known_hosts
 
     # If SSH exists in persistent location but not in home
     if [ "$usr_ssh_exists" = true ] && [ "$home_ssh_exists" = false ]; then
@@ -2280,6 +2304,21 @@ detect_issues() {
         ISSUE_FIXES[$issues_found]="backup_ssh"
         ISSUE_DESCRIPTIONS[$issues_found]="No SSH backup found - Backup recommended"
         ISSUE_PRIORITIES[$issues_found]=3
+    fi
+
+    # Check for GitHub's host key in known_hosts
+    if [ -f "/home/comma/.ssh/known_hosts" ]; then
+        if ! grep -q "ssh.github.com" "/home/comma/.ssh/known_hosts"; then
+            issues_found=$((issues_found + 1))
+            ISSUE_FIXES[$issues_found]="check_github_known_hosts"
+            ISSUE_DESCRIPTIONS[$issues_found]="GitHub's host key not found in known_hosts"
+            ISSUE_PRIORITIES[$issues_found]=2
+        fi
+    else
+        issues_found=$((issues_found + 1))
+        ISSUE_FIXES[$issues_found]="check_github_known_hosts"
+        ISSUE_DESCRIPTIONS[$issues_found]="SSH known_hosts file missing"
+        ISSUE_PRIORITIES[$issues_found]=2
     fi
 
     # Check backup age if it exists
