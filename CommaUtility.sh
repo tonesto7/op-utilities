@@ -2202,6 +2202,7 @@ repo_build_and_management_menu() {
         8) clone_public_bluepilot ;;
         9) clone_internal_dev ;;
         10)
+            clear
             cd "/data/openpilot" || return
             scons -j"$(nproc)"
             pause_for_user
