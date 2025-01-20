@@ -14,8 +14,8 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly SCRIPT_VERSION="2.2.3"
-readonly SCRIPT_MODIFIED="2025-01-17"
+readonly SCRIPT_VERSION="2.3.0"
+readonly SCRIPT_MODIFIED="2025-01-20"
 
 # We unify color-coded messages in a single block for consistency:
 readonly RED='\033[0;31m'
@@ -1319,6 +1319,140 @@ reset_openpilot_repo() {
         clone_openpilot_repo "true"
     else
         print_info "Reset cancelled."
+    fi
+}
+
+###############################################################################
+# Boot & Logo Update Functions
+###############################################################################
+
+# Define paths:
+readonly BOOT_IMG="/usr/comma/bg.jpg"
+readonly LOGO_IMG="/data/openpilot/selfdrive/assets/img_spinner_comma.png"
+
+readonly BLUEPILOT_BOOT_IMG="/data/openpilot/selfdrive/assets/img_bluepilot_boot.jpg"
+readonly BLUEPILOT_LOGO_IMG="/data/openpilot/selfdrive/assets/img_bluepilot_logo.png"
+
+readonly BOOT_IMG_BKP="${BOOT_IMG}.backup"
+readonly LOGO_IMG_BKP="${LOGO_IMG}.backup"
+
+mount_rw_boot_logo() {
+    print_info "Mounting / partition as read-write for boot image update..."
+    sudo mount -o remount,rw /
+}
+
+update_boot_and_logo() {
+    mount_rw_boot_logo
+
+    # Ensure the original files exist before proceeding
+    if [ ! -f "$BOOT_IMG" ]; then
+        print_error "Boot image ($BOOT_IMG) does not exist. Aborting update."
+        pause_for_user
+        return 1
+    fi
+    if [ ! -f "$LOGO_IMG" ]; then
+        print_error "Logo image ($LOGO_IMG) does not exist. Aborting update."
+        pause_for_user
+        return 1
+    fi
+
+    # Create backups if they do not already exist
+    if [ ! -f "$BOOT_IMG_BKP" ]; then
+        sudo cp "$BOOT_IMG" "$BOOT_IMG_BKP"
+        print_success "Backup created for boot image at $BOOT_IMG_BKP"
+    else
+        print_info "Backup for boot image already exists at $BOOT_IMG_BKP"
+    fi
+
+    if [ ! -f "$LOGO_IMG_BKP" ]; then
+        sudo cp "$LOGO_IMG" "$LOGO_IMG_BKP"
+        print_success "Backup created for logo image at $LOGO_IMG_BKP"
+    else
+        print_info "Backup for logo image already exists at $LOGO_IMG_BKP"
+    fi
+
+    # Ensure the BluePilot images exist
+    if [ ! -f "$BLUEPILOT_BOOT_IMG" ]; then
+        print_error "BluePilot boot image ($BLUEPILOT_BOOT_IMG) not found."
+        pause_for_user
+        return 1
+    fi
+    if [ ! -f "$BLUEPILOT_LOGO_IMG" ]; then
+        print_error "BluePilot logo image ($BLUEPILOT_LOGO_IMG) not found."
+        pause_for_user
+        return 1
+    fi
+
+    # Overwrite the original files with the BluePilot images
+    sudo cp "$BLUEPILOT_BOOT_IMG" "$BOOT_IMG"
+    sudo cp "$BLUEPILOT_LOGO_IMG" "$LOGO_IMG"
+    print_success "Boot and logo images updated with BluePilot files."
+    pause_for_user
+}
+
+restore_boot_and_logo() {
+    mount_rw_boot_logo
+
+    # Check if backups exist before attempting restoration
+    if [ ! -f "$BOOT_IMG_BKP" ]; then
+        print_error "Backup for boot image not found at $BOOT_IMG_BKP"
+        pause_for_user
+        return 1
+    fi
+    if [ ! -f "$LOGO_IMG_BKP" ]; then
+        print_error "Backup for logo image not found at $LOGO_IMG_BKP"
+        pause_for_user
+        return 1
+    fi
+
+    # Restore backups to the original file locations
+    sudo cp "$BOOT_IMG_BKP" "$BOOT_IMG"
+    sudo cp "$LOGO_IMG_BKP" "$LOGO_IMG"
+
+    # Remove the backups
+    sudo rm -f "$BOOT_IMG_BKP"
+    sudo rm -f "$LOGO_IMG_BKP"
+
+    print_success "Boot and logo images restored from backup."
+    pause_for_user
+}
+
+toggle_boot_logo() {
+    # clear
+    print_info "Boot Icon and Logo Update/Restore Utility"
+    echo "+-------------------------------------------------+"
+
+    # Check if the original files exist
+    if [ ! -f "$BOOT_IMG" ]; then
+        print_error "Boot image ($BOOT_IMG) is missing; cannot proceed."
+        pause_for_user
+        return 1
+    fi
+    if [ ! -f "$LOGO_IMG" ]; then
+        print_error "Logo image ($LOGO_IMG) is missing; cannot proceed."
+        pause_for_user
+        return 1
+    fi
+
+    # If backup files exist, offer restoration; otherwise, offer update.
+    if [ -f "$BOOT_IMG_BKP" ] && [ -f "$LOGO_IMG_BKP" ]; then
+        echo "Backup files exist."
+        read -p "Do you want to restore the original boot and logo images? (y/N): " answer
+        if [[ "$answer" =~ ^[Yy]$ ]]; then
+            restore_boot_and_logo
+        else
+            print_info "Restore cancelled."
+            pause_for_user
+        fi
+    else
+        echo "No backups found."
+        read -p "Do you want to update boot and logo images with BluePilot files? (y/N): " answer
+        if [[ "$answer" =~ ^[Yy]$ ]]; then
+            update_boot_and_logo
+        else
+            print_info "Update cancelled."
+            pause_for_user
+        fi
     fi
 }
 
@@ -2706,9 +2840,10 @@ display_main_menu() {
     echo "4. View Recent Error"
     echo "5. System Statistics"
     echo "6. Device Controls"
+    echo "7. Modify Boot Icon/Logo"
 
     # Dynamic fix options
-    local fix_number=7 # Start from 6 because we already have 5 options
+    local fix_number=8 # Start from 6 because we already have 5 options
     for i in "${!ISSUE_FIXES[@]}"; do
         local color=""
         case "${ISSUE_PRIORITIES[$i]}" in
@@ -2736,9 +2871,10 @@ handle_main_menu_input() {
     4) view_error_log ;;
     5) system_statistics_menu ;;
     6) device_controls_menu ;;
-    [7-9] | [1-9][0-9])
+    7) toggle_boot_logo ;;
+    [8-10] | [1-10][0-10])
         # Calculate array index by adjusting for the 4 standard menu items
-        local fix_index=$((main_choice - 6))
+        local fix_index=$((main_choice - 7))
         if [ -n "${ISSUE_FIXES[$fix_index]}" ]; then
             ${ISSUE_FIXES[$fix_index]}
         else
