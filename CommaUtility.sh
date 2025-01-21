@@ -973,6 +973,7 @@ select_branch_menu() {
             print_info "Branch selection canceled."
             return 1
         elif [[ "$branch_choice" =~ ^[0-9]+$ ]] && [ "$branch_choice" -ge 1 ] && [ "$branch_choice" -le "$branch_count" ]; then
+            clear
             SELECTED_BRANCH="${branch_array[$((branch_choice - 1))]}"
             print_info "Selected branch: $SELECTED_BRANCH"
             break
@@ -1964,6 +1965,7 @@ prepare_commit_push() {
     local COMMIT_DESC_HEADER=$1
     local ORIGIN_REPO=$2
     local BUILD_BRANCH=$3
+    local PUSH_REPO=${4:-$ORIGIN_REPO} # Use alternative repo if provided, otherwise use origin
 
     if [ ! -f "$BUILD_DIR/common/version.h" ]; then
         print_error "Error: $BUILD_DIR/common/version.h not found."
@@ -1998,51 +2000,53 @@ master commit: $GIT_HASH
     if git show-ref --verify --quiet "refs/heads/$BUILD_BRANCH"; then
         git branch -D "$BUILD_BRANCH" || exit 1
     fi
-    if git ls-remote --heads "$ORIGIN_REPO" "$BUILD_BRANCH" | grep "$BUILD_BRANCH" >/dev/null 2>&1; then
-        git push "$ORIGIN_REPO" --delete "$BUILD_BRANCH" || exit 1
+    if git ls-remote --heads "$PUSH_REPO" "$BUILD_BRANCH" | grep "$BUILD_BRANCH" >/dev/null 2>&1; then
+        git push "$PUSH_REPO" --delete "$BUILD_BRANCH" || exit 1
     fi
 
     git branch -m "$BUILD_BRANCH" >/dev/null 2>&1 || exit 1
-    git push -f "$ORIGIN_REPO" "$BUILD_BRANCH" || exit 1
+    git push -f "$PUSH_REPO" "$BUILD_BRANCH" || exit 1
 }
 
-build_cross_repo_branch() {
-    local CLONE_BRANCH="$1"
-    local BUILD_BRANCH="$2"
-    local COMMIT_DESC_HEADER="$3"
-    local GIT_REPO_ORIGIN="$4"
-    local GIT_PUBLIC_REPO_ORIGIN="$5"
+# build_cross_repo_branch() {
+#     clear
+#     local CLONE_BRANCH="$1"
+#     local BUILD_BRANCH="$2"
+#     local COMMIT_DESC_HEADER="$3"
+#     local GIT_REPO_ORIGIN="$4"
+#     local GIT_PUBLIC_REPO_ORIGIN="$5"
 
-    local CURRENT_DIR
-    CURRENT_DIR=$(pwd)
+#     local CURRENT_DIR
+#     CURRENT_DIR=$(pwd)
 
-    rm -rf "$BUILD_DIR" "$TMP_DIR"
-    git clone --single-branch --branch "$BUILD_BRANCH" "$GIT_PUBLIC_REPO_ORIGIN" "$BUILD_DIR"
-    cd "$BUILD_DIR" || exit 1
-    find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
-    git clone --depth 1 "$GIT_REPO_ORIGIN" -b "$CLONE_BRANCH" "$TMP_DIR"
-    cd "$TMP_DIR" || exit 1
-    git submodule update --init --recursive
-    process_submodules "$TMP_DIR"
-    cd "$BUILD_DIR" || exit 1
-    rsync -a --exclude='.git' "$TMP_DIR/" "$BUILD_DIR/"
-    rm -rf "$TMP_DIR"
-    setup_git_env_bp
-    build_openpilot_bp
-    handle_panda_directory
-    create_opendbc_gitignore
-    update_main_gitignore
-    cleanup_files
-    create_prebuilt_marker
-    prepare_commit_push "$COMMIT_DESC_HEADER" "$GIT_PUBLIC_REPO_ORIGIN" "$BUILD_BRANCH"
-    cd "$CURRENT_DIR" || exit 1
-}
+#     rm -rf "$BUILD_DIR" "$TMP_DIR"
+#     git clone --single-branch --branch "$BUILD_BRANCH" "$GIT_PUBLIC_REPO_ORIGIN" "$BUILD_DIR"
+#     cd "$BUILD_DIR" || exit 1
+#     find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+#     git clone --depth 1 "$GIT_REPO_ORIGIN" -b "$CLONE_BRANCH" "$TMP_DIR"
+#     cd "$TMP_DIR" || exit 1
+#     git submodule update --init --recursive
+#     process_submodules "$TMP_DIR"
+#     cd "$BUILD_DIR" || exit 1
+#     rsync -a --exclude='.git' "$TMP_DIR/" "$BUILD_DIR/"
+#     rm -rf "$TMP_DIR"
+#     setup_git_env_bp
+#     build_openpilot_bp
+#     handle_panda_directory
+#     create_opendbc_gitignore
+#     update_main_gitignore
+#     cleanup_files
+#     create_prebuilt_marker
+#     prepare_commit_push "$COMMIT_DESC_HEADER" "$GIT_PUBLIC_REPO_ORIGIN" "$BUILD_BRANCH"
+#     cd "$CURRENT_DIR" || exit 1
+# }
 
 build_repo_branch() {
     local CLONE_BRANCH="$1"
     local BUILD_BRANCH="$2"
     local COMMIT_DESC_HEADER="$3"
     local GIT_REPO_ORIGIN="$4"
+    local PUSH_REPO="$5" # Optional parameter for alternative push repository
 
     # Check available disk space first
     verify_disk_space 5000 || {
@@ -2073,7 +2077,13 @@ build_repo_branch() {
     update_main_gitignore
     cleanup_files
     create_prebuilt_marker
-    prepare_commit_push "$COMMIT_DESC_HEADER" "$GIT_REPO_ORIGIN" "$BUILD_BRANCH"
+
+    if [ -n "$PUSH_REPO" ]; then
+        prepare_commit_push "$COMMIT_DESC_HEADER" "$GIT_REPO_ORIGIN" "$BUILD_BRANCH" "$PUSH_REPO"
+    else
+        prepare_commit_push "$COMMIT_DESC_HEADER" "$GIT_REPO_ORIGIN" "$BUILD_BRANCH"
+    fi
+
     cd "$CURRENT_DIR" || exit 1
 }
 
@@ -2091,7 +2101,11 @@ clone_repo_bp() {
     rm -rf openpilot
     git clone --depth 1 "${repo_url}" -b "${branch}" openpilot || exit 1
     cd openpilot || exit 1
-    git submodule update --init --recursive
+
+    # Check if there are any submodules and if so, update them
+    if git submodule status | grep -q '^[^-]'; then
+        git submodule update --init --recursive
+    fi
 
     if [ "$build" == "yes" ]; then
         scons -j"$(nproc)" || exit 1
@@ -2179,8 +2193,8 @@ choose_repository_and_branch() {
     CLONE_BRANCH="$SELECTED_BRANCH"
     BUILD_BRANCH="${CLONE_BRANCH}-build"
 
-    print_info "Selected branch: $CLONE_BRANCH"
-    print_info "Build branch will be: $BUILD_BRANCH"
+    # print_info "Selected branch: $CLONE_BRANCH"
+    # print_info "Build branch would be: $BUILD_BRANCH"
     return 0
 }
 
@@ -2235,6 +2249,8 @@ custom_build_process() {
         return
     fi
 
+    print_info "Building branch: $CLONE_BRANCH"
+    print_info "Build branch would be: $BUILD_BRANCH"
     local COMMIT_DESC_HEADER="Custom Build"
     build_repo_branch "$CLONE_BRANCH" "$BUILD_BRANCH" "$COMMIT_DESC_HEADER" "$GIT_REPO_ORIGIN"
     print_success "[-] Action completed successfully"
@@ -2346,7 +2362,8 @@ repo_build_and_management_menu() {
             pause_for_user
             ;;
         12)
-            build_cross_repo_branch "bp-public-experimental" "staging-DONOTUSE" "bluepilot experimental" "$GIT_BP_PRIVATE_REPO" "$GIT_BP_PUBLIC_REPO"
+            build_repo_branch "bp-public-experimental" "staging-DONOTUSE" "bluepilot experimental" "$GIT_BP_PRIVATE_REPO" "$GIT_BP_PUBLIC_REPO"
+
             pause_for_user
             ;;
         13)
@@ -3038,7 +3055,7 @@ main() {
             # SCRIPT_ACTION is set from arguments, run corresponding logic
             case "$SCRIPT_ACTION" in
             build-public)
-                build_cross_repo_branch "bp-public-experimental" "staging-DONOTUSE" "bluepilot experimental" "$GIT_BP_PRIVATE_REPO" "$GIT_BP_PUBLIC_REPO"
+                build_repo_branch "bp-public-experimental" "staging-DONOTUSE" "bluepilot experimental" "$GIT_BP_PRIVATE_REPO" "$GIT_BP_PUBLIC_REPO"
                 ;;
             build-dev)
                 build_repo_branch "bp-internal-dev" "bp-internal-dev-build" "bluepilot internal dev" "$GIT_BP_PRIVATE_REPO"
