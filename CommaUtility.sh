@@ -14,7 +14,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly SCRIPT_VERSION="2.3.0"
+readonly SCRIPT_VERSION="2.3.1"
 readonly SCRIPT_MODIFIED="2025-01-20"
 
 # We unify color-coded messages in a single block for consistency:
@@ -2320,7 +2320,7 @@ repo_build_and_management_menu() {
         echo "13. Custom build from any branch"
         echo ""
         echo "Reset Operations:"
-        echo "13. Remove and Re-clone repository"
+        echo "14. Remove and Re-clone repository"
         echo ""
         echo "Q. Back to Main Menu"
 
@@ -2345,15 +2345,15 @@ repo_build_and_management_menu() {
             build_repo_branch "bp-internal-dev" "bp-internal-dev-build" "bluepilot internal dev" "$GIT_BP_PRIVATE_REPO"
             pause_for_user
             ;;
-        11)
+        12)
             build_cross_repo_branch "bp-public-experimental" "staging-DONOTUSE" "bluepilot experimental" "$GIT_BP_PRIVATE_REPO" "$GIT_BP_PUBLIC_REPO"
             pause_for_user
             ;;
-        12)
+        13)
             custom_build_process
             pause_for_user
             ;;
-        13) reset_openpilot_repo ;;
+        14) reset_openpilot_repo ;;
         [qQ]) break ;;
         *) print_error "Invalid choice." ;;
         esac
