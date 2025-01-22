@@ -14,7 +14,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly SCRIPT_VERSION="2.4.0"
+readonly SCRIPT_VERSION="2.4.1"
 readonly SCRIPT_MODIFIED="2025-01-22"
 
 # We unify color-coded messages in a single block for consistency:
@@ -1859,22 +1859,6 @@ handle_panda_directory() {
     mv "$BUILD_DIR/panda_tmp" "$BUILD_DIR/panda"
 }
 
-process_submodules() {
-    local MOD_DIR="$1"
-    local SUBMODULES=("msgq_repo" "opendbc" "rednose_repo" "panda" "tinygrad_repo" "teleoprtc_repo")
-
-    for SUBMODULE in "${SUBMODULES[@]}"; do
-        mkdir -p "${MOD_DIR}/${SUBMODULE}_tmp"
-        cp -r "${MOD_DIR}/$SUBMODULE/." "${MOD_DIR}/${SUBMODULE}_tmp" || :
-        git submodule deinit -f "$SUBMODULE" 2>/dev/null
-        git rm -rf --cached "$SUBMODULE" 2>/dev/null
-        rm -rf "${MOD_DIR}/$SUBMODULE"
-        mv "${MOD_DIR}/${SUBMODULE}_tmp" "${MOD_DIR}/$SUBMODULE"
-        rm -rf "${MOD_DIR}/.git/modules/$SUBMODULE"
-        git add -f "$SUBMODULE" 2>/dev/null
-    done
-}
-
 create_opendbc_gitignore() {
     cat >opendbc_repo/.gitignore <<EOL
 .mypy_cache/
@@ -2034,9 +2018,9 @@ build_repo_branch() {
     local BUILD_BRANCH="$2"
     local COMMIT_DESC_HEADER="$3"
     local GIT_REPO_ORIGIN="$4"
-    local PUSH_REPO="$5" # Optional parameter for alternative push repository
+    local PUSH_REPO="$5" # Optional alternative push repository
 
-    # Check available disk space first
+    # Check available disk space first.
     verify_disk_space 5000 || {
         print_error "Insufficient disk space for build operation"
         return 1
@@ -2052,7 +2036,8 @@ build_repo_branch() {
     fi
 
     cd "$BUILD_DIR" || exit 1
-    # Check if there are any submodules and if so, update them
+
+    # Update submodules if any.
     if [ -f ".gitmodules" ]; then
         if ! git_operation_with_timeout "git submodule update --init --recursive" 300; then
             print_error "Failed to update submodules"
@@ -2063,7 +2048,10 @@ build_repo_branch() {
     setup_git_env_bp
     build_openpilot_bp
     handle_panda_directory
-    process_submodules_alternate "$BUILD_DIR"
+
+    # Convert all submodules into plain directories.
+    process_submodules "$BUILD_DIR"
+
     create_opendbc_gitignore
     update_main_gitignore
     cleanup_files
@@ -2076,6 +2064,38 @@ build_repo_branch() {
     fi
 
     cd "$CURRENT_DIR" || exit 1
+}
+
+process_submodules() {
+    local mod_dir="$1"
+    local submodules=("msgq_repo" "opendbc_repo" "rednose_repo" "panda" "tinygrad_repo" "teleoprtc_repo")
+
+    for sub in "${submodules[@]}"; do
+        if [ -d "${mod_dir}/${sub}" ]; then
+            # Create a temporary copy preserving all attributes.
+            local tmp_dir="${mod_dir}/${sub}_tmp"
+            rm -rf "$tmp_dir"
+            cp -a "${mod_dir}/${sub}" "$tmp_dir"
+
+            # Remove any .git folder inside the copied submodule so that files are tracked as normal files.
+            rm -rf "$tmp_dir/.git"
+
+            # Remove the submodule from git’s index.
+            git rm -rf --cached "$sub" 2>/dev/null
+
+            # Remove the original submodule directory.
+            rm -rf "${mod_dir}/${sub}"
+
+            # Rename the temporary directory to the original name.
+            mv "$tmp_dir" "${mod_dir}/${sub}"
+
+            # Remove any leftover git metadata from the main repository.
+            rm -rf "${mod_dir}/.git/modules/${sub}"
+
+            # Force add the now-converted directory.
+            git add "$sub"
+        fi
+    done
 }
 
 clone_repo_bp() {
@@ -2349,19 +2369,25 @@ repo_build_and_management_menu() {
             pause_for_user
             ;;
         11)
+            clear
             build_repo_branch "bp-internal-dev" "bp-internal-dev-build" "bluepilot internal dev" "$GIT_BP_PRIVATE_REPO"
             pause_for_user
             ;;
         12)
+            clear
             build_repo_branch "bp-public-experimental" "staging-DONOTUSE" "bluepilot experimental" "$GIT_BP_PRIVATE_REPO" "$GIT_BP_PUBLIC_REPO"
-
             pause_for_user
             ;;
         13)
+            clear
             custom_build_process
             pause_for_user
             ;;
-        14) reset_openpilot_repo ;;
+        14)
+            clear
+            reset_openpilot_repo
+            pause_for_user
+            ;;
         [qQ]) break ;;
         *) print_error "Invalid choice." ;;
         esac
