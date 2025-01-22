@@ -14,8 +14,8 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly SCRIPT_VERSION="2.3.1"
-readonly SCRIPT_MODIFIED="2025-01-20"
+readonly SCRIPT_VERSION="2.4.0"
+readonly SCRIPT_MODIFIED="2025-01-22"
 
 # We unify color-coded messages in a single block for consistency:
 readonly RED='\033[0;31m'
@@ -308,8 +308,11 @@ git_clone_and_init() {
 
     cd "$dest_dir" || return 1
 
-    local submodule_cmd="git submodule update --init --recursive"
-    execute_with_network_retry "$submodule_cmd" "Failed to update submodules"
+    # Check if there are any submodules and .gitmodules file if so, update them
+    if [ -f ".gitmodules" ]; then
+        local submodule_cmd="git submodule update --init --recursive"
+        execute_with_network_retry "$submodule_cmd" "Failed to update submodules"
+    fi
 }
 
 git_operation_with_timeout() {
@@ -1113,35 +1116,37 @@ change_branch() {
         return 1
     fi
 
-    # Handle submodules
-    print_info "Updating submodules..."
+    if [ -f ".gitmodules" ]; then
+        # Handle submodules
+        print_info "Updating submodules..."
 
-    # First deinitialize all submodules
-    git submodule deinit -f .
+        # First deinitialize all submodules
+        git submodule deinit -f .
 
-    # Remove old submodule directories
-    local submodules=("msgq_repo" "opendbc_repo" "panda" "rednose_repo" "teleoprtc_repo" "tinygrad_repo")
-    for submodule in "${submodules[@]}"; do
-        if [ -d "$submodule" ]; then
-            print_info "Removing old $submodule directory..."
-            rm -rf "$submodule"
-            rm -rf ".git/modules/$submodule"
+        # Remove old submodule directories
+        local submodules=("msgq_repo" "opendbc_repo" "panda" "rednose_repo" "teleoprtc_repo" "tinygrad_repo")
+        for submodule in "${submodules[@]}"; do
+            if [ -d "$submodule" ]; then
+                print_info "Removing old $submodule directory..."
+                rm -rf "$submodule"
+                rm -rf ".git/modules/$submodule"
+            fi
+        done
+
+        # Initialize and update submodules
+        print_info "Initializing submodules..."
+        if ! git submodule init; then
+            print_error "Failed to initialize submodules"
+            pause_for_user
+            return 1
         fi
-    done
 
-    # Initialize and update submodules
-    print_info "Initializing submodules..."
-    if ! git submodule init; then
-        print_error "Failed to initialize submodules"
-        pause_for_user
-        return 1
-    fi
-
-    print_info "Updating submodules (this may take a while)..."
-    if ! git submodule update --recursive; then
-        print_error "Failed to update submodules"
-        pause_for_user
-        return 1
+        print_info "Updating submodules (this may take a while)..."
+        if ! git submodule update --recursive; then
+            print_error "Failed to update submodules"
+            pause_for_user
+            return 1
+        fi
     fi
 
     print_success "Successfully switched to branch: $SELECTED_BRANCH"
@@ -1290,9 +1295,11 @@ clone_openpilot_repo() {
         fi
         (
             cd openpilot || return
-            if ! git_operation_with_timeout "git submodule update --init --recursive" 300; then
-                print_error "Failed to update submodules"
-                return 1
+            if [ -f ".gitmodules" ]; then
+                if ! git_operation_with_timeout "git submodule update --init --recursive" 300; then
+                    print_error "Failed to update submodules"
+                    return 1
+                fi
             fi
         )
     else
@@ -1302,9 +1309,11 @@ clone_openpilot_repo() {
         fi
         (
             cd openpilot || return
-            if ! git_operation_with_timeout "git submodule update --init --recursive" 300; then
-                print_error "Failed to update submodules"
-                return 1
+            if [ -f ".gitmodules" ]; then
+                if ! git_operation_with_timeout "git submodule update --init --recursive" 300; then
+                    print_error "Failed to update submodules"
+                    return 1
+                fi
             fi
         )
     fi
@@ -1903,6 +1912,16 @@ update_main_gitignore() {
         "selfdrive/modeld/_dmonitoringmodeld"
     )
 
+    # local LINES_TO_ADD=(
+    #     "selfdrive/controls/lib/lateral_mpc_lib/acados_ocp_lat.json"
+    #     "selfdrive/controls/lib/longitudinal_mpc_lib/acados_ocp_long.json"
+    # )
+
+    # # Add the following lines to the gitignore file
+    # for LINE in "${LINES_TO_ADD[@]}"; do
+    #     echo "$LINE" >>"$GITIGNORE_PATH"
+    # done
+
     for LINE in "${LINES_TO_REMOVE[@]}"; do
         if [ "$OS" = "Darwin" ]; then
             sed -i '' "/^${LINE//\//\\/}$/d" "$GITIGNORE_PATH"
@@ -1928,6 +1947,7 @@ cleanup_files() {
     rm -rf tools/replay tools/rerun tools/scripts tools/serial tools/sim tools/tuning tools/webcam
     rm -f tools/*.py tools/*.sh tools/*.md
     rm -f conftest.py SECURITY.md uv.lock
+    rm -f selfdrive/controls/lib/lateral_mpc_lib/.gitignore selfdrive/controls/lib/longitudinal_mpc_lib/.gitignore
 
     cleanup_directory "$BUILD_DIR/cereal" "*tests* *.md"
     cleanup_directory "$BUILD_DIR/common" "*tests* *.md"
@@ -1987,7 +2007,8 @@ prepare_commit_push() {
     create_prebuilt_marker
 
     git checkout --orphan temp_branch --quiet
-    git add -A >/dev/null 2>&1
+
+    git add -f -A >/dev/null 2>&1
     git commit -m "$COMMIT_DESC_HEADER | v$VERSION-$TIME_CODE
 version: $COMMIT_DESC_HEADER v$SP_VERSION release
 date: $DATETIME
@@ -2007,39 +2028,6 @@ master commit: $GIT_HASH
     git branch -m "$BUILD_BRANCH" >/dev/null 2>&1 || exit 1
     git push -f "$PUSH_REPO" "$BUILD_BRANCH" || exit 1
 }
-
-# build_cross_repo_branch() {
-#     clear
-#     local CLONE_BRANCH="$1"
-#     local BUILD_BRANCH="$2"
-#     local COMMIT_DESC_HEADER="$3"
-#     local GIT_REPO_ORIGIN="$4"
-#     local GIT_PUBLIC_REPO_ORIGIN="$5"
-
-#     local CURRENT_DIR
-#     CURRENT_DIR=$(pwd)
-
-#     rm -rf "$BUILD_DIR" "$TMP_DIR"
-#     git clone --single-branch --branch "$BUILD_BRANCH" "$GIT_PUBLIC_REPO_ORIGIN" "$BUILD_DIR"
-#     cd "$BUILD_DIR" || exit 1
-#     find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
-#     git clone --depth 1 "$GIT_REPO_ORIGIN" -b "$CLONE_BRANCH" "$TMP_DIR"
-#     cd "$TMP_DIR" || exit 1
-#     git submodule update --init --recursive
-#     process_submodules "$TMP_DIR"
-#     cd "$BUILD_DIR" || exit 1
-#     rsync -a --exclude='.git' "$TMP_DIR/" "$BUILD_DIR/"
-#     rm -rf "$TMP_DIR"
-#     setup_git_env_bp
-#     build_openpilot_bp
-#     handle_panda_directory
-#     create_opendbc_gitignore
-#     update_main_gitignore
-#     cleanup_files
-#     create_prebuilt_marker
-#     prepare_commit_push "$COMMIT_DESC_HEADER" "$GIT_PUBLIC_REPO_ORIGIN" "$BUILD_BRANCH"
-#     cd "$CURRENT_DIR" || exit 1
-# }
 
 build_repo_branch() {
     local CLONE_BRANCH="$1"
@@ -2064,15 +2052,18 @@ build_repo_branch() {
     fi
 
     cd "$BUILD_DIR" || exit 1
-    if ! git_operation_with_timeout "git submodule update --init --recursive" 300; then
-        print_error "Failed to update submodules"
-        return 1
+    # Check if there are any submodules and if so, update them
+    if [ -f ".gitmodules" ]; then
+        if ! git_operation_with_timeout "git submodule update --init --recursive" 300; then
+            print_error "Failed to update submodules"
+            return 1
+        fi
     fi
 
     setup_git_env_bp
     build_openpilot_bp
     handle_panda_directory
-    process_submodules "$BUILD_DIR"
+    process_submodules_alternate "$BUILD_DIR"
     create_opendbc_gitignore
     update_main_gitignore
     cleanup_files
@@ -2103,7 +2094,7 @@ clone_repo_bp() {
     cd openpilot || exit 1
 
     # Check if there are any submodules and if so, update them
-    if git submodule status | grep -q '^[^-]'; then
+    if [ -f ".gitmodules" ]; then
         git submodule update --init --recursive
     fi
 
