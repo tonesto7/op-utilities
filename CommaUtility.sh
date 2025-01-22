@@ -14,7 +14,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly SCRIPT_VERSION="2.4.1"
+readonly SCRIPT_VERSION="2.4.2"
 readonly SCRIPT_MODIFIED="2025-01-22"
 
 # We unify color-coded messages in a single block for consistency:
