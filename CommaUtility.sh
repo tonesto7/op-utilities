@@ -132,6 +132,63 @@ else
 fi
 
 readonly TMP_DIR="${BUILD_DIR}-build-tmp"
+readonly UTILITY_CONFIG_DIR="/data/commautil"
+readonly UTILITY_CONFIG_FILE="${UTILITY_CONFIG_DIR}/utility_config.json"
+# Device Backup Related Constants
+readonly BACKUP_BASE_DIR="/data/device_backup"
+readonly BACKUP_METADATA_FILE="metadata.json"
+readonly BACKUP_DIRS=(
+    "/home/comma/.ssh"
+    "/persist/comma"
+    "/data/params/d"
+    "/data/commautil"
+)
+readonly ROUTES_SCRIPT="/data/CommaUtilityRoutes.sh"
+
+# Initialize utility config and ensure routes script is available
+init_utility_config
+ensure_routes_script
+
+ensure_routes_script() {
+    if [ ! -f "$ROUTES_SCRIPT" ]; then
+        print_info "Downloading CommaUtilityRoutes.sh..."
+        wget -O "$ROUTES_SCRIPT" "https://raw.githubusercontent.com/tonesto7/op-utilities/main/CommaUtilityRoutes.sh"
+        chmod +x "$ROUTES_SCRIPT"
+    fi
+}
+
+get_device_id() {
+    serial=$(cat /data/params/d/HardwareSerial)
+    if [ -z "$serial" ]; then
+        echo "Unknown"
+    else
+        echo "$serial"
+    fi
+}
+
+get_dongle_id() {
+    dongle_id=$(cat /data/params/d/DongleId)
+    if [ -z "$dongle_id" ]; then
+        echo "Unknown"
+    else
+        echo "$dongle_id"
+    fi
+}
+
+get_wifi_mac() {
+    mac=$(cat /sys/class/net/wlan0/address)
+    if [ -z "$mac" ]; then
+        echo "Unknown"
+    else
+        echo "$mac"
+    fi
+}
+
+# Add a function to get network locations from routes script
+get_network_locations() {
+    ensure_routes_script
+    "$ROUTES_SCRIPT" --select-network-location
+}
 
 # Check file permissions and owner
 # Returns:
@@ -166,70 +223,390 @@ check_file_permissions_owner() {
     return 0
 }
 
-# Create a backup of all SSH files
+# Create a backup of devices SSH, SSH Keys, params, and commautil
 # Returns:
 # - 0: Success
 # - 1: Failure
-backup_ssh() {
-    # clear
-    print_info "Backing up SSH files..."
-    if [ -f "/home/comma/.ssh/github" ] &&
-        [ -f "/home/comma/.ssh/github.pub" ] &&
-        [ -f "/home/comma/.ssh/config" ]; then
-        mkdir -p "/data/ssh_backup"
-        cp "/home/comma/.ssh/github" "/data/ssh_backup/"
-        cp "/home/comma/.ssh/github.pub" "/data/ssh_backup/"
-        cp "/home/comma/.ssh/config" "/data/ssh_backup/"
-        sudo chown comma:comma "/data/ssh_backup" -R
-        sudo chmod 600 "/data/ssh_backup/github"
-        save_backup_metadata
-        print_success "SSH files backed up successfully to /data/ssh_backup/"
+backup_device() {
+    local device_id=$(get_device_id)
+    local timestamp=$(date +%Y%m%d_%H%M%S)
+    local backup_name="${device_id}_${timestamp}"
+    local backup_dir="${BACKUP_BASE_DIR}/${backup_name}"
+
+    # Create backup directory structure
+    mkdir -p "${backup_dir}/ssh"
+    mkdir -p "${backup_dir}/persist"
+    mkdir -p "${backup_dir}/params"
+    mkdir -p "${backup_dir}/commautil"
+
+    # Perform backups for each directory type
+    local backup_success=true
+    local backup_stats=()
+
+    # Function to backup a directory and collect stats
+    backup_directory() {
+        local src="$1"
+        local dest="$2"
+        local type="$3"
+
+        if [ -d "$src" ]; then
+            tar czf "${dest}/backup.tar.gz" -C "$(dirname ${src})" "$(basename ${src})"
+            local size=$(du -b "${dest}/backup.tar.gz" | cut -f1)
+            local files=$(tar tzf "${dest}/backup.tar.gz" | wc -l)
+            backup_stats+=("{\"type\":\"$type\",\"size\":$size,\"files\":$files}")
+            return 0
+        else
+            backup_success=false
+            return 1
+        fi
+    }
+
+    # Backup each directory type
+    backup_directory "/home/comma/.ssh" "${backup_dir}/ssh" "ssh"
+    backup_directory "/persist/comma" "${backup_dir}/persist" "persist"
+    backup_directory "/data/params/d" "${backup_dir}/params" "params"
+    backup_directory "/data/commautil" "${backup_dir}/commautil" "commautil"
+
+    # Create metadata file
+    create_backup_metadata "$backup_dir" "$backup_name" "$device_id" "${backup_stats[@]}"
+
+    if [ "$backup_success" = true ]; then
+        if [ "$silent_mode" = "silent" ]; then
+            # Return JSON with backup info
+            echo "{\"status\":\"success\",\"backup_path\":\"$backup_dir\"}"
+            return 0
+        else
+            print_success "Backup completed successfully"
+
+            # If auto-sync is enabled, sync to all network locations
+            if [ "$AUTO_SYNC" = "true" ]; then
+                sync_to_all_network_locations "$backup_dir"
+            else
+                # Ask if user wants to sync to network
+                read -p "Would you like to sync this backup to a network location? (y/N): " sync_choice
+                if [[ "$sync_choice" =~ ^[Yy]$ ]]; then
+                    sync_backup_to_network "$backup_dir"
+                fi
+            fi
+        fi
     else
-        print_warning "No valid SSH files found to backup."
+        if [ "$silent_mode" = "silent" ]; then
+            echo "{\"status\":\"error\",\"message\":\"Backup completed with errors\"}"
+            return 1
+        else
+            print_warning "Backup completed with some errors"
+        fi
+    fi
+
+    return 0
+}
+
+init_utility_config() {
+    # Create config directory if it doesn't exist
+    if [ ! -d "$UTILITY_CONFIG_DIR" ]; then
+        mkdir -p "$UTILITY_CONFIG_DIR"
+        chmod 775 "$UTILITY_CONFIG_DIR"
+        chown comma:comma "$UTILITY_CONFIG_DIR"
+    fi
+
+    # Create config file if it doesn't exist
+    if [ ! -f "$UTILITY_CONFIG_FILE" ]; then
+        echo '{"preferred_backup_location": null}' >"$UTILITY_CONFIG_FILE"
+        chmod 664 "$UTILITY_CONFIG_FILE"
+        chown comma:comma "$UTILITY_CONFIG_FILE"
+    fi
+}
+
+set_preferred_backup_location() {
+    ensure_routes_script
+
+    echo "+----------------------------------------------+"
+    echo "|      Configure Preferred Backup Location     |"
+    echo "+----------------------------------------------+"
+
+    # Get current setting
+    local current_location_id
+    current_location_id=$(jq -r '.preferred_backup_location' "$UTILITY_CONFIG_FILE")
+    if [ -n "$current_location_id" ] && [ "$current_location_id" != "null" ]; then
+        local label
+        label=$("$ROUTES_SCRIPT" --get-location-label "$current_location_id")
+        echo "Current preferred location: $label"
+    else
+        echo "No preferred location set"
+    fi
+
+    # Ask to change
+    read -p "Would you like to change the preferred backup location? (y/N): " change
+    if [[ "$change" =~ ^[Yy]$ ]]; then
+        local location_info
+        location_info=$("$ROUTES_SCRIPT" --select-network-location)
+        if [ $? -eq 0 ]; then
+            local location_id
+            location_id=$(echo "$location_info" | jq -r '.location_id')
+            jq --arg id "$location_id" '.preferred_backup_location = $id' "$UTILITY_CONFIG_FILE" >"${UTILITY_CONFIG_FILE}.tmp"
+            mv "${UTILITY_CONFIG_FILE}.tmp" "$UTILITY_CONFIG_FILE"
+            print_success "Preferred backup location updated"
+        fi
     fi
     pause_for_user
 }
 
-# Restore SSH files from backup with verification
-restore_ssh() {
-    # clear
-    print_info "Restoring SSH files..."
-    if check_ssh_backup; then
-        if ! verify_backup_integrity; then
-            print_error "Backup files appear to be corrupted"
-            pause_for_user
-            return 1
-        fi
+sync_backup_to_network() {
+    local backup_dir="$1"
+    local specific_network_id="$2"
+    local silent_mode="$3"
 
-        print_info "Found backup with the following information:"
-        get_backup_metadata
-        read -p "Do you want to proceed with restore? (y/N): " confirm
-        if [[ $confirm =~ ^[Yy]$ ]]; then
-            # Always clean both locations before restore
-            remove_ssh_contents
+    ensure_routes_script
 
-            # Restore to home directory
-            mkdir -p /home/comma/.ssh
-            cp /data/ssh_backup/github /home/comma/.ssh/
-            cp /data/ssh_backup/github.pub /home/comma/.ssh/
-            cp /data/ssh_backup/config /home/comma/.ssh/
-            sudo chown comma:comma /home/comma/.ssh -R
-            sudo chmod 600 /home/comma/.ssh/github
-
-            # Ensure persistent storage is updated
-            copy_ssh_config_and_keys
-
-            # Restart SSH agent
-            restart_ssh_agent
-
-            print_success "SSH files restored successfully."
-        else
-            print_info "Restore cancelled."
-        fi
+    if [ -n "$specific_network_id" ]; then
+        # Use specified network location
+        "$ROUTES_SCRIPT" --transfer-backup "$backup_dir" --network "$specific_network_id"
     else
-        print_warning "No valid SSH backup found to restore."
+        # Check for preferred location
+        local preferred_location_id
+        preferred_location_id=$(jq -r '.preferred_backup_location' "$UTILITY_CONFIG_FILE")
+
+        if [ -n "$preferred_location_id" ] && [ "$preferred_location_id" != "null" ]; then
+            "$ROUTES_SCRIPT" --transfer-backup "$backup_dir" --network "$preferred_location_id"
+        else
+            if [ "$silent_mode" != "silent" ]; then
+                print_warning "No preferred backup location set."
+                read -p "Would you like to configure one now? (y/N): " configure
+                if [[ "$configure" =~ ^[Yy]$ ]]; then
+                    set_preferred_backup_location
+                    # Try again after configuration
+                    preferred_location_id=$(jq -r '.preferred_backup_location' "$UTILITY_CONFIG_FILE")
+                    if [ -n "$preferred_location_id" ] && [ "$preferred_location_id" != "null" ]; then
+                        "$ROUTES_SCRIPT" --transfer-backup "$backup_dir" --network "$preferred_location_id"
+                    fi
+                fi
+            fi
+        fi
+    fi
+}
+
+# Restore SSH files from backup with verification
+restore_backup() {
+    clear
+    echo "+----------------------------------------------+"
+    echo "|            Restore from Backup               |"
+    echo "+----------------------------------------------+"
+    echo "| Restore Source:"
+    echo "| 1. Local device backup"
+    echo "| 2. Network location"
+    echo "| Q. Cancel"
+    echo "+----------------------------------------------+"
+
+    read -p "Select restore source: " source_choice
+
+    case $source_choice in
+    1) restore_from_local ;;
+    2) restore_from_network ;;
+    [qQ]) return ;;
+    *)
+        print_error "Invalid selection"
+        pause_for_user
+        ;;
+    esac
+}
+
+restore_from_local() {
+    # List available local backups
+    local backups=()
+    local i=1
+    while IFS= read -r backup_dir; do
+        if [ -f "${backup_dir}/${BACKUP_METADATA_FILE}" ]; then
+            local metadata
+            metadata=$(cat "${backup_dir}/${BACKUP_METADATA_FILE}")
+            backups+=("$backup_dir")
+            local timestamp device_id total_size
+            timestamp=$(echo "$metadata" | jq -r '.timestamp')
+            device_id=$(echo "$metadata" | jq -r '.device_id')
+            total_size=$(echo "$metadata" | jq -r '.total_size')
+            echo "$i) ${timestamp} - Device: ${device_id} (${total_size})"
+            i=$((i + 1))
+        fi
+    done < <(find "$BACKUP_BASE_DIR" -mindepth 1 -maxdepth 1 -type d)
+
+    if [ ${#backups[@]} -eq 0 ]; then
+        print_info "No local backups found."
+        pause_for_user
+        return
+    fi
+
+    echo "Q) Cancel"
+    echo "----------------------------------------------"
+    read -p "Select backup to restore: " choice
+
+    case $choice in
+    [qQ]) return ;;
+    *)
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#backups[@]}" ]; then
+            local selected_backup="${backups[$((choice - 1))]}"
+            restore_from_backup "$selected_backup"
+        else
+            print_error "Invalid selection"
+            pause_for_user
+        fi
+        ;;
+    esac
+}
+
+restore_from_network() {
+    ensure_routes_script
+    local backup_dir="/tmp/network_restore"
+
+    # Get network location from routes script
+    local location_info
+    location_info=$("$ROUTES_SCRIPT" --select-network-location)
+    if [ $? -eq 0 ]; then
+        local location_type location
+        read -r location_type location <<<"$location_info"
+
+        # Let routes script handle fetching the backup
+        if "$ROUTES_SCRIPT" --fetch-backup "$backup_dir" "$location_info"; then
+            if [ -f "${backup_dir}/${BACKUP_METADATA_FILE}" ]; then
+                restore_from_backup "$backup_dir"
+            else
+                print_error "Invalid backup data received"
+            fi
+        else
+            print_error "Failed to fetch backup from network location"
+        fi
+        rm -rf "$backup_dir"
     fi
     pause_for_user
+}
+
+create_backup_metadata() {
+    local backup_dir="$1"
+    local backup_name="$2"
+    local device_id="$3"
+    shift 3
+    local stats=("$@")
+
+    cat >"${backup_dir}/${BACKUP_METADATA_FILE}" <<EOF
+{
+    "backup_id": "${backup_name}",
+    "device_id": "${device_id}",
+    "timestamp": "$(date -Iseconds)",
+    "script_version": "${SCRIPT_VERSION}",
+    "agnos_version": "$(cat /VERSION 2>/dev/null)",
+    "directories": [
+        $(printf "%s," "${stats[@]}" | sed 's/,$//')
+    ],
+    "total_size": "$(du -sh "${backup_dir}" | cut -f1)"
+}
+EOF
+}
+
+restore_from_backup() {
+    local backup_dir="$1"
+    local metadata
+    metadata=$(cat "${backup_dir}/${BACKUP_METADATA_FILE}")
+
+    echo "The following components will be restored:"
+    echo "----------------------------------------"
+    echo "$metadata" | jq -r '.directories[] | "- \(.type) (\(.files) files, \(.size) bytes)"'
+    echo "----------------------------------------"
+    read -p "Continue with restore? (y/N): " confirm
+
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        mount_rw
+
+        # Restore each component
+        local components=("ssh" "persist" "params" "commautil")
+        local restore_paths=(
+            "/home/comma/.ssh"
+            "/persist/comma"
+            "/data/params/d"
+            "/data/commautil"
+        )
+
+        for i in "${!components[@]}"; do
+            local component="${components[$i]}"
+            local restore_path="${restore_paths[$i]}"
+
+            if [ -f "${backup_dir}/${component}/backup.tar.gz" ]; then
+                print_info "Restoring ${component}..."
+                # Create parent directory if it doesn't exist
+                mkdir -p "$(dirname "$restore_path")"
+                # Extract backup
+                tar xzf "${backup_dir}/${component}/backup.tar.gz" -C "$(dirname "$restore_path")"
+                # Fix permissions
+                chown -R comma:comma "$restore_path"
+
+                # Special handling for SSH files
+                if [ "$component" = "ssh" ]; then
+                    # Fix SSH permissions
+                    chmod 600 "$restore_path/github"
+                    chmod 644 "$restore_path/github.pub"
+                    chmod 644 "$restore_path/config"
+
+                    # Copy to persistent storage
+                    copy_ssh_config_and_keys
+
+                    # Restart SSH agent
+                    restart_ssh_agent
+                fi
+            fi
+        done
+
+        print_success "Restore completed"
+    else
+        print_info "Restore cancelled"
+    fi
+    pause_for_user
+}
+
+perform_automated_backup() {
+    local network_id="$1"
+
+    if [ -z "$network_id" ]; then
+        print_error "Missing network ID for automated backup"
+        exit 1
+    fi
+
+    # Check if device is onroad
+    if [ -f "/data/params/d/IsOnroad" ] && grep -q "^1" "/data/params/d/IsOnroad"; then
+        print_error "Cannot perform backup while device is onroad"
+        exit 1
+    fi
+
+    # Verify network location exists
+    local network_config="/data/commautil/network_locations.json"
+    if [ ! -f "$network_config" ]; then
+        print_error "Network configuration not found"
+        exit 1
+    fi
+
+    # Verify network ID exists
+    local location
+    location=$(jq --arg id "$network_id" '.smb[] + .ssh[] | select(.location_id == $id)' "$network_config")
+    if [ -z "$location" ]; then
+        print_error "Network location with ID $network_id not found"
+        exit 1
+    fi
+
+    # Perform backup
+    local backup_result
+    backup_result=$(backup_device "silent")
+    if [ $? -ne 0 ]; then
+        print_error "Backup failed"
+        exit 1
+    fi
+
+    # Extract backup path from result
+    local backup_path
+    backup_path=$(echo "$backup_result" | jq -r '.backup_path')
+
+    # Sync to network
+    if ! sync_backup_to_network "$backup_path" "$network_id"; then
+        print_error "Network sync failed"
+        exit 1
+    fi
+
+    exit 0
 }
 
 restart_ssh_agent() {
@@ -250,6 +627,58 @@ restart_ssh_agent() {
     else
         print_warning "SSH agent restarted but no key found to add."
     fi
+}
+
+migrate_legacy_backup() {
+    clear
+    print_info "Old backup format detected at /data/ssh_backup"
+    echo "This script now uses a new backup format that includes additional device data."
+    echo "Would you like to:"
+    echo "1. Create new backup and remove old backup data"
+    echo "2. Create new backup and keep old backup data"
+    echo "3. Skip migration for now"
+
+    read -p "Enter choice (1-3): " choice
+
+    case $choice in
+    1 | 2)
+        print_info "Creating new format backup..."
+        if backup_device; then
+            if [ "$choice" = "1" ]; then
+                print_info "Removing old backup data..."
+                rm -rf "/data/ssh_backup"
+                print_success "Old backup data removed"
+            else
+                print_info "Old backup data preserved at /data/ssh_backup"
+            fi
+            print_success "Migration completed successfully"
+        else
+            print_error "Backup failed - keeping old backup data"
+        fi
+        ;;
+    3)
+        print_info "Migration skipped. You can migrate later using the backup menu."
+        ;;
+    *)
+        print_error "Invalid choice"
+        ;;
+    esac
+    pause_for_user
+}
+
+remove_legacy_backup() {
+    clear
+    print_info "Old backup format detected at /data/ssh_backup"
+    echo "This script now uses a new backup format that includes additional device data."
+    echo "Would you like to remove the old backup data?"
+    read -p "Enter y or n: " remove_choice
+    if [ "$remove_choice" = "y" ]; then
+        rm -rf "/data/ssh_backup"
+        print_success "Old backup data removed"
+    else
+        print_info "Old backup data preserved at /data/ssh_backup"
+    fi
+    pause_for_user
 }
 
 # Check disk usage and resize root if needed
@@ -380,11 +809,16 @@ get_absolute_path() {
 display_ssh_status_short() {
     print_info "| SSH Status:"
     if [ -f "/home/comma/.ssh/github" ]; then
-        echo "| └─ Key: Found"
-        if [ -f "/data/ssh_backup/metadata.txt" ]; then
-            local last_backup
-            last_backup=$(grep "Backup Date:" /data/ssh_backup/metadata.txt | cut -d: -f2- | xargs)
-            echo "| └─ Backup: Last Backup $last_backup"
+        echo "| └ Key: Found"
+
+        # Find most recent backup
+        local latest_backup
+        latest_backup=$(find "$BACKUP_BASE_DIR" -mindepth 1 -maxdepth 1 -type d -exec stat -c "%Y %n" {} \; | sort -nr | head -n1 | cut -d' ' -f2)
+
+        if [ -n "$latest_backup" ] && [ -f "${latest_backup}/${BACKUP_METADATA_FILE}" ]; then
+            local backup_timestamp
+            backup_timestamp=$(jq -r '.timestamp' "${latest_backup}/${BACKUP_METADATA_FILE}")
+            echo "| └ Backup: Last Backup $backup_timestamp"
         fi
     fi
 }
@@ -401,17 +835,6 @@ display_ssh_status() {
     local expected_owner="comma"
     local expected_permissions="-rw-------"
     ssh_status=()
-
-    # Backup age check
-    local backup_date
-    local backup_age
-    local backup_days
-
-    if [ -f "/data/ssh_backup/metadata.txt" ]; then
-        backup_date=$(grep "Backup Date:" /data/ssh_backup/metadata.txt | cut -d: -f2- | xargs)
-        backup_age=$(($(date +%s) - $(date -d "$backup_date" +%s)))
-        backup_days=$((backup_age / 86400))
-    fi
 
     # Check main key
     check_file_permissions_owner "/home/comma/.ssh/github" "$expected_permissions" "$expected_owner"
@@ -432,25 +855,35 @@ display_ssh_status() {
         ssh_status+=("missing")
     fi
 
+    # Find most recent backup
+    local latest_backup
+    latest_backup=$(find "$BACKUP_BASE_DIR" -mindepth 1 -maxdepth 1 -type d -exec stat -c "%Y %n" {} \; | sort -nr | head -n1 | cut -d' ' -f2)
+
     # Backup status
-    if [ -f "/data/ssh_backup/github" ] &&
-        [ -f "/data/ssh_backup/github.pub" ] &&
-        [ -f "/data/ssh_backup/config" ]; then
+    if [ -n "$latest_backup" ] && [ -f "${latest_backup}/${BACKUP_METADATA_FILE}" ]; then
         echo -e "${NC}|${GREEN} SSH Backup Status: ✅${NC}"
-        if [ -f "/data/ssh_backup/metadata.txt" ]; then
-            echo -e "|  └─ Last Backup: $backup_date"
-            if [ "$backup_days" -gt 30 ]; then
-                echo -e "${NC}|${YELLOW}  └─ Warning: Backup is $backup_days days old${NC}"
+
+        local backup_timestamp
+        backup_timestamp=$(jq -r '.timestamp' "${latest_backup}/${BACKUP_METADATA_FILE}")
+        echo -e "|  └─ Last Backup: $backup_timestamp"
+
+        # Calculate backup age
+        local backup_age
+        local backup_days
+        backup_age=$(($(date +%s) - $(date -d "$backup_timestamp" +%s)))
+        backup_days=$((backup_age / 86400))
+
+        if [ "$backup_days" -gt 30 ]; then
+            echo -e "${NC}|${YELLOW}  └─ Warning: Backup is $backup_days days old${NC}"
+        fi
+
+        if [ -f "/home/comma/.ssh/github" ]; then
+            # Check if backup contains SSH files
+            if jq -e '.directories[] | select(.type=="ssh")' "${latest_backup}/${BACKUP_METADATA_FILE}" >/dev/null; then
+                echo -e "|  └─ SSH files included in backup"
+            else
+                echo -e "${NC}|${YELLOW}  └─ Warning: SSH files not included in backup${NC}"
             fi
-            if [ -f "/home/comma/.ssh/github" ]; then
-                if diff -q "/home/comma/.ssh/github" "/data/ssh_backup/github" >/dev/null; then
-                    echo -e "|  └─ Backup is current with active SSH files"
-                else
-                    echo -e "${NC}|${YELLOW}  └─ Backup differs from active SSH files${NC}"
-                fi
-            fi
-        else
-            echo -e "${NC}|${YELLOW}  └─ Backup metadata not found${NC}"
         fi
     else
         echo -e "${NC}|${RED} SSH Backup Status: ❌${NC}"
@@ -473,14 +906,22 @@ EOF
 }
 
 check_ssh_backup() {
-    # Return 0 if valid backup found, else 1
-    if [ -f "/data/ssh_backup/github" ] &&
-        [ -f "/data/ssh_backup/github.pub" ] &&
-        [ -f "/data/ssh_backup/config" ]; then
-        return 0
-    else
-        return 1
+    # Find most recent backup
+    local latest_backup
+    latest_backup=$(find "$BACKUP_BASE_DIR" -mindepth 1 -maxdepth 1 -type d -exec stat -c "%Y %n" {} \; | sort -nr | head -n1 | cut -d' ' -f2)
+
+    # Return 0 if valid backup with SSH files found, else 1
+    if [ -n "$latest_backup" ] && [ -f "${latest_backup}/${BACKUP_METADATA_FILE}" ]; then
+        # Check if SSH directory exists in backup metadata
+        if jq -e '.directories[] | select(.type=="ssh")' "${latest_backup}/${BACKUP_METADATA_FILE}" >/dev/null; then
+            # Verify the actual SSH files exist in the backup
+            if [ -f "${latest_backup}/ssh/backup.tar.gz" ]; then
+                # Optional: Could add additional verification by checking the tar contents
+                return 0
+            fi
+        fi
     fi
+    return 1
 }
 
 ssh_operation_with_timeout() {
@@ -490,16 +931,6 @@ ssh_operation_with_timeout() {
         print_error "SSH operation timed out after ${timeout} seconds"
         return 1
     }
-}
-
-verify_backup_integrity() {
-    local backup_dir="/data/ssh_backup"
-    for file in "github" "github.pub" "config"; do
-        if [ ! -f "$backup_dir/$file" ] || [ ! -s "$backup_dir/$file" ]; then
-            return 1
-        fi
-    done
-    return 0
 }
 
 check_ssh_config_completeness() {
@@ -529,7 +960,7 @@ change_github_ssh_port() {
     print_info "Updating github SSH config to use port 443..."
     create_ssh_config
     copy_ssh_config_and_keys
-    backup_ssh
+    backup_device
     print_success "github SSH config updated successfully."
     pause_for_user
 }
@@ -545,7 +976,6 @@ test_ssh_connection() {
     fi
 
     # Create known_hosts directory if it doesn't exist
-    # mkdir -p /home/comma/.ssh
     touch /home/comma/.ssh/known_hosts
 
     # Use yes to automatically accept the host key and pipe to ssh
@@ -554,26 +984,22 @@ test_ssh_connection() {
     if echo "$result" | grep -q "successfully authenticated"; then
         print_success "SSH connection test successful."
 
-        # Update metadata file with test date
-        local test_date
-        test_date=$(date '+%Y-%m-%d %H:%M:%S')
+        # Update metadata for the most recent backup if it exists
+        local latest_backup
+        latest_backup=$(find "$BACKUP_BASE_DIR" -mindepth 1 -maxdepth 1 -type d -exec stat -c "%Y %n" {} \; | sort -nr | head -n1 | cut -d' ' -f2)
 
-        if [ -f "/data/ssh_backup/metadata.txt" ]; then
-            # Check if Last SSH Test line exists
-            if grep -q "Last SSH Test:" "/data/ssh_backup/metadata.txt"; then
-                # Update existing line
-                sed -i "s/Last SSH Test:.*/Last SSH Test: $test_date/" "/data/ssh_backup/metadata.txt"
-            else
-                # Append new line if it doesn't exist
-                echo "Last SSH Test: $test_date" >>"/data/ssh_backup/metadata.txt"
-            fi
+        if [ -n "$latest_backup" ] && [ -f "${latest_backup}/${BACKUP_METADATA_FILE}" ]; then
+            local test_date
+            test_date=$(date -Iseconds)
+
+            # Update the metadata file with the new test date
+            # Create a temporary file with updated metadata
+            jq --arg date "$test_date" '. + {"last_ssh_test": $date}' "${latest_backup}/${BACKUP_METADATA_FILE}" >"${latest_backup}/${BACKUP_METADATA_FILE}.tmp"
+            mv "${latest_backup}/${BACKUP_METADATA_FILE}.tmp" "${latest_backup}/${BACKUP_METADATA_FILE}"
+
+            print_info "Updated backup metadata with successful test date"
         else
-            # Create new metadata file if it doesn't exist
-            mkdir -p "/data/ssh_backup"
-            cat >"/data/ssh_backup/metadata.txt" <<EOF
-Backup Date: Not backed up
-Last SSH Test: $test_date
-EOF
+            print_info "No recent backup found - create a backup to store SSH test results"
         fi
     else
         print_error "SSH connection test failed."
@@ -642,7 +1068,8 @@ repair_create_ssh() {
     # If missing from both locations but backup exists
     if [ "$home_ssh_exists" = false ] && [ "$usr_ssh_exists" = false ] && check_ssh_backup; then
         print_info "No SSH keys found. Restoring from backup..."
-        restore_ssh
+        pause_for_user
+        restore_backup
         return 0
     fi
 
@@ -653,7 +1080,7 @@ repair_create_ssh() {
         create_ssh_config
         generate_ssh_key
         copy_ssh_config_and_keys
-        backup_ssh
+        backup_device
         test_ssh_connection
         return 0
     fi
@@ -688,7 +1115,7 @@ repair_create_ssh() {
 reset_ssh() {
     clear
     if [ -f "/home/comma/.ssh/github" ]; then
-        backup_ssh
+        backup_device
     fi
     remove_ssh_contents
     create_ssh_config
@@ -697,7 +1124,7 @@ reset_ssh() {
     restart_ssh_agent
     test_ssh_connection
     print_info "Creating backup of new SSH setup..."
-    backup_ssh
+    backup_device
     pause_for_user
 }
 
@@ -764,7 +1191,7 @@ import_ssh_keys() {
     copy_ssh_config_and_keys
 
     # Create backup
-    backup_ssh
+    backup_device
 
     # Restart SSH agent
     restart_ssh_agent
@@ -802,27 +1229,6 @@ import_ssh_menu() {
 }
 
 ###############################################################################
-# SSH Metadata Functions
-###############################################################################
-
-save_backup_metadata() {
-    local backup_time
-    backup_time=$(date '+%Y-%m-%d %H:%M:%S')
-    cat >/data/ssh_backup/metadata.txt <<EOF
-Backup Date: $backup_time
-Last SSH Test: $backup_time
-EOF
-}
-
-get_backup_metadata() {
-    if [ -f "/data/ssh_backup/metadata.txt" ]; then
-        cat /data/ssh_backup/metadata.txt
-    else
-        print_warning "No backup metadata found"
-    fi
-}
-
-###############################################################################
 # Disk Space Management
 ###############################################################################
 
@@ -846,8 +1252,9 @@ display_disk_space_short() {
     local data_usage_data
     data_usage_root=$(df -h / | awk 'NR==2 {printf "Used: %s/%s (%s)", $3, $2, $5}')
     data_usage_data=$(df -h /data | awk 'NR==2 {printf "Used: %s/%s (%s)", $3, $2, $5}')
-    echo "| ├─ (/):     $data_usage_root"
-    echo "| └─ (/data): $data_usage_data"
+    echo "| ├ (/):     $data_usage_root"
+    echo "| └ (/data): $data_usage_data"
+
 }
 
 display_git_status_short() {
@@ -859,11 +1266,11 @@ display_git_status_short() {
             local branch_name
             repo_name=$(git config --get remote.origin.url | awk -F'/' '{print $NF}' | sed 's/.git//')
             branch_name=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-            echo "| ├─ Repository: $repo_name"
-            echo "| └─ Branch: $branch_name"
+            echo "| ├ Repository: $repo_name"
+            echo "| └ Branch: $branch_name"
         )
     else
-        echo -e "${YELLOW}| └─ Repository: Missing${NC}"
+        echo -e "${YELLOW}| └ Repository: Missing${NC}"
     fi
 }
 
@@ -1471,14 +1878,15 @@ toggle_boot_logo() {
 ###############################################################################
 
 display_os_info_short() {
-    print_info "| OS Information:"
     local agnos_version
+    local build_time
     agnos_version=$(cat /VERSION 2>/dev/null)
-    if [ -n "$agnos_version" ]; then
-        echo "| └─ AGNOS: v$agnos_version"
-    else
-        echo "| └─ AGNOS: Unknown"
-    fi
+    build_time=$(awk 'NR==2' /BUILD 2>/dev/null)
+    print_info "| System Information:"
+    print_info "| ├ AGNOS: $agnos_version ($build_time)"
+    print_info "| ├ Hardware Serial: $(get_device_id)"
+    print_info "| ├ Panda Dongle ID: $(get_dongle_id)"
+    print_info "| └ WiFi MAC Address: $(get_wifi_mac)"
 }
 
 display_general_status() {
@@ -1487,9 +1895,12 @@ display_general_status() {
     agnos_version=$(cat /VERSION 2>/dev/null)
     build_time=$(awk 'NR==2' /BUILD 2>/dev/null)
     echo "+----------------------------------------------+"
-    echo "|           Other Items                        |"
+    echo "|                 Other Items                  |"
     echo "+----------------------------------------------+"
-    echo "- AGNOS: v$agnos_version ($build_time)"
+    echo "| AGNOS: v$agnos_version ($build_time)"
+    echo "| Hardware Serial: $(get_device_id)"
+    echo "| WiFi MAC Address: $(get_wifi_mac)"
+    echo "| Panda Dongle ID: $(get_dongle_id)"
     echo "+----------------------------------------------+"
 }
 
@@ -1735,62 +2146,59 @@ CommaUtility Script (V$SCRIPT_VERSION) - Last Modified: $SCRIPT_MODIFIED
 
 Usage: ./CommaUtility.sh [OPTION] [PARAMETERS]
 
+Device Backup Operations:
+  --backup                      Create device backup
+    --network <location_id>     Network location ID for backup
+    --auto-sync                 Auto-sync to configured locations
+  --restore-device              Restore from device backup
+  --set-backup-location         Configure preferred backup location
+  --migrate-backup              Migrate from old backup format to new format
+
+
 SSH Operations:
-  --import-ssh                      Import SSH keys from files
-    --private-key-file <path>       Path to private key file
-    --public-key-file <path>        Path to public key file
-  --test-ssh                        Test SSH connection to GitHub
-  --backup-ssh                      Backup SSH files
-  --restore-ssh                     Restore SSH files from backup
-  --reset-ssh                       Reset SSH configuration
+  --test-ssh                    Test SSH connection to GitHub
+  --reset-ssh                   Reset SSH configuration and create new keys
+  --copy-ssh-persist            Copy SSH config to persistent storage
 
 Build Operations:
-  --build-dev                       Build BluePilot internal dev
-  --build-public                    Build BluePilot public experimental
-  --custom-build                    Perform a custom build
-    --repo <repository>             Select repository (bluepilotdev, sp-dev-c3, sunnypilot, or commaai)
-    --clone-branch <branch>         Branch to clone
-    --build-branch <branch>         Branch name for build
-
-Clone Operations:
-  --clone-public-bp                 Clone BluePilot staging branch
-  --clone-internal-dev-build        Clone BluePilot internal dev build
-  --clone-internal-dev              Clone BluePilot internal dev
-  --custom-clone                    Clone a specific repository/branch
-    --repo <repository>             Repository to clone from
-    --clone-branch <branch>         Branch to clone
+  --build-dev                   Build BluePilot internal dev
+  --build-public                Build BluePilot public experimental
+  --custom-build                Perform a custom build
+    --repo <repository>         Select repository (bluepilotdev, sp-dev-c3, sunnypilot, or commaai)
+    --clone-branch <branch>     Branch to clone
+    --build-branch <branch>     Branch name for build
 
 System Operations:
-  --update                          Update this script to latest version
-  --reboot                          Reboot the device
-  --shutdown                        Shutdown the device
-  --view-logs                       View system logs
+  --update                      Update this script to latest version
+  --reboot                      Reboot the device
+  --shutdown                    Shutdown the device
+  --view-logs                   View system logs
 
 Git Operations:
-  --git-pull                        Fetch and pull latest changes
-  --git-status                      Show Git repository status
-  --git-branch <branch>            Switch to specified branch
+  --git-pull                    Fetch and pull latest changes
+  --git-status                  Show Git repository status
+  --git-branch <branch>         Switch to specified branch
+
+Network Operations:
+  --manage-locations            Manage network locations
+  --manage-jobs                 Manage auto sync/backup jobs
 
 General:
-  -h, --help                        Show this help message
+  -h, --help                    Show this help message
 
 Examples:
-  # SSH operations
-  ./CommaUtility.sh --import-ssh --private-key-file /path/to/key --public-key-file /path/to/key.pub
-  ./CommaUtility.sh --test-ssh
+  # Create device backup
+  ./CommaUtility.sh --backup
+  ./CommaUtility.sh --backup --network <location_id>
+
+  # Restore from backup
+  ./CommaUtility.sh --restore-device
+
+  # Configure backup location
+  ./CommaUtility.sh --set-backup-location
 
   # Build operations
   ./CommaUtility.sh --custom-build --repo bluepilotdev --clone-branch dev --build-branch build
-
-  # Clone operations
-  ./CommaUtility.sh --custom-clone --repo sunnypilot --clone-branch master
-
-  # System operations
-  ./CommaUtility.sh --update
-  ./CommaUtility.sh --reboot
-
-  # Git operations
-  ./CommaUtility.sh --git-branch master
 
 Note: When no options are provided, the script will launch in interactive menu mode.
 EOL
@@ -2278,37 +2686,44 @@ ssh_menu() {
         echo "+----------------------------------------------+"
         echo ""
         echo -e "${GREEN}Available Actions:${NC}"
-        echo "1. Repair/Create SSH setup"
-        echo "2. Import SSH keys from host system"
-        echo "3. Copy SSH config and keys to persistent storage"
-        echo "4. Reset SSH setup and recreate keys"
-        echo "5. Test SSH connection"
-        echo "6. View SSH key"
-        echo "7. Change Github SSH port to 443"
-        if [ -f "/home/comma/.ssh/github" ]; then
-            echo "B. Backup SSH files"
+        echo "1. Create Device Backup"
+        echo "2. Restore from Backup"
+        echo "3. Import SSH keys from host system"
+        echo "4. Copy SSH config and keys to persistent storage"
+        echo "5. Reset SSH setup and recreate keys"
+        echo "6. Test SSH connection"
+        echo "7. View SSH key"
+        echo "8. Change Github SSH port to 443"
+        echo "9. Configure Auto-Backup"
+        echo "10. Configure Preferred Backup Location"
+
+        # Add migration option if old backup detected
+        if [ -d "/data/ssh_backup" ] && [ -f "/data/ssh_backup/metadata.txt" ]; then
+            echo "M. Migrate from old backup format"
         fi
-        if check_ssh_backup; then
-            echo "X. Restore SSH files from backup"
-        fi
+
         echo "Q. Back to Main Menu"
         read -p "Enter your choice: " choice
         case $choice in
-        1) repair_create_ssh ;;
-        2) import_ssh_menu ;;
-        3) copy_ssh_config_and_keys ;;
-        4) reset_ssh ;;
-        5) test_ssh_connection ;;
-        6) view_ssh_key ;;
-        7) change_github_ssh_port ;;
-        [bB])
-            if [ -f "/home/comma/.ssh/github" ]; then
-                backup_ssh
-            fi
+        1) backup_device ;;
+        2) restore_backup ;;
+        3) import_ssh_menu ;;
+        4) copy_ssh_config_and_keys ;;
+        5) reset_ssh ;;
+        6) test_ssh_connection ;;
+        7) view_ssh_key ;;
+        8) change_github_ssh_port ;;
+        9)
+            ensure_routes_script
+            "$ROUTES_SCRIPT" --manage-backup-sync-menu
             ;;
-        [xX])
-            if check_ssh_backup; then
-                restore_ssh
+        10) set_preferred_backup_location ;;
+        [mM])
+            if [ -d "/data/ssh_backup" ] && [ -f "/data/ssh_backup/metadata.txt" ]; then
+                migrate_legacy_backup
+            else
+                print_error "No old backup format detected"
+                pause_for_user
             fi
             ;;
         [qQ]) break ;;
@@ -2401,109 +2816,78 @@ repo_build_and_management_menu() {
 detect_issues() {
     ISSUE_FIXES=()
     ISSUE_DESCRIPTIONS=()
-    ISSUE_PRIORITIES=()
+    ISSUE_PRIORITIES=() # 1=Critical, 2=Warning, 3=Recommendation
     local issues_found=0
 
-    # SSH Status Checks
-    local home_ssh_exists=false
-    local usr_ssh_exists=false
-    local backup_exists=false
+    # Check if device backup exists
+    local device_id=$(get_device_id)
+    local has_backup=false
+    local backup_age_days=0
 
-    [ -f "/home/comma/.ssh/github" ] && home_ssh_exists=true
-    [ -f "/usr/default/home/comma/.ssh/github" ] && usr_ssh_exists=true
-    check_ssh_backup && backup_exists=true
+    # Find most recent backup
+    local latest_backup
+    latest_backup=$(find "$BACKUP_BASE_DIR" -mindepth 1 -maxdepth 1 -type d -exec stat -c "%Y %n" {} \; | sort -nr | head -n1 | cut -d' ' -f2)
 
-    # Scenario 1: Missing from both locations
-    if [ "$home_ssh_exists" = false ] && [ "$usr_ssh_exists" = false ]; then
-        issues_found=$((issues_found + 1))
-        if [ "$backup_exists" = true ]; then
-            ISSUE_FIXES[$issues_found]="restore_ssh"
-            ISSUE_DESCRIPTIONS[$issues_found]="SSH keys missing from all locations - Backup available for restore"
-            ISSUE_PRIORITIES[$issues_found]=1
-        else
-            ISSUE_FIXES[$issues_found]="repair_create_ssh"
-            ISSUE_DESCRIPTIONS[$issues_found]="SSH keys missing from all locations - New setup required"
-            ISSUE_PRIORITIES[$issues_found]=1
-        fi
+    if [ -n "$latest_backup" ] && [ -f "${latest_backup}/${BACKUP_METADATA_FILE}" ]; then
+        has_backup=true
+        local backup_timestamp
+        backup_timestamp=$(jq -r '.timestamp' "${latest_backup}/${BACKUP_METADATA_FILE}")
+        backup_age_days=$((($(date +%s) - $(date -d "$backup_timestamp" +%s)) / 86400))
     fi
 
-    # Scenario 2: Missing from home but exists in persistent storage
-    if [ "$home_ssh_exists" = false ] && [ "$usr_ssh_exists" = true ]; then
+    # Check SSH files status
+    if [ ! -f "/home/comma/.ssh/github" ]; then
         issues_found=$((issues_found + 1))
         ISSUE_FIXES[$issues_found]="repair_create_ssh"
-        ISSUE_DESCRIPTIONS[$issues_found]="SSH keys missing from /home/comma/.ssh/ but available in persistent storage"
+        ISSUE_DESCRIPTIONS[$issues_found]="SSH keys missing - setup required"
         ISSUE_PRIORITIES[$issues_found]=1
     fi
 
-    # Scenario 3: Missing from persistent but exists in home
-    if [ "$home_ssh_exists" = true ] && [ "$usr_ssh_exists" = false ]; then
+    # Check persistent storage
+    if [ -f "/home/comma/.ssh/github" ] && [ ! -f "/usr/default/home/comma/.ssh/github" ]; then
         issues_found=$((issues_found + 1))
         ISSUE_FIXES[$issues_found]="copy_ssh_config_and_keys"
         ISSUE_DESCRIPTIONS[$issues_found]="SSH keys not synchronized to persistent storage"
         ISSUE_PRIORITIES[$issues_found]=2
     fi
 
-    # Permission checks (only if files exist)
-    if [ "$home_ssh_exists" = true ]; then
-        check_file_permissions_owner "/home/comma/.ssh/github" "-rw-------" "comma"
-        local home_perm_check=$?
-        if [ "$home_perm_check" -eq 1 ]; then
-            issues_found=$((issues_found + 1))
-            ISSUE_FIXES[$issues_found]="repair_create_ssh"
-            ISSUE_DESCRIPTIONS[$issues_found]="SSH key permissions/ownership incorrect in home directory"
-            ISSUE_PRIORITIES[$issues_found]=2
-        fi
-    fi
-
-    if [ "$usr_ssh_exists" = true ]; then
-        check_file_permissions_owner "/usr/default/home/comma/.ssh/github" "-rw-------" "comma"
-        local usr_perm_check=$?
-        if [ "$usr_perm_check" -eq 1 ]; then
-            issues_found=$((issues_found + 1))
-            ISSUE_FIXES[$issues_found]="repair_create_ssh"
-            ISSUE_DESCRIPTIONS[$issues_found]="SSH key permissions/ownership incorrect in persistent storage"
-            ISSUE_PRIORITIES[$issues_found]=2
-        fi
-    fi
-
-    # Backup recommendations
-    if [ "$home_ssh_exists" = true ] && [ "$backup_exists" = false ]; then
+    # Check device backup status
+    if [ "$has_backup" = false ]; then
         issues_found=$((issues_found + 1))
-        ISSUE_FIXES[$issues_found]="backup_ssh"
-        ISSUE_DESCRIPTIONS[$issues_found]="No SSH backup found - Backup recommended"
+        ISSUE_FIXES[$issues_found]="backup_device"
+        ISSUE_DESCRIPTIONS[$issues_found]="No device backup found"
+        ISSUE_PRIORITIES[$issues_found]=2
+    elif [ "$backup_age_days" -gt 30 ]; then
+        issues_found=$((issues_found + 1))
+        ISSUE_FIXES[$issues_found]="backup_device"
+        ISSUE_DESCRIPTIONS[$issues_found]="Device backup is $backup_age_days days old"
         ISSUE_PRIORITIES[$issues_found]=3
     fi
 
-    # Check for GitHub's host key in known_hosts
-    # if [ -f "/home/comma/.ssh/known_hosts" ]; then
-    #     if ! grep -q "ssh.github.com" "/home/comma/.ssh/known_hosts"; then
-    #         issues_found=$((issues_found + 1))
-    #         ISSUE_FIXES[$issues_found]="check_github_known_hosts"
-    #         ISSUE_DESCRIPTIONS[$issues_found]="GitHub's host key not found in known_hosts"
-    #         ISSUE_PRIORITIES[$issues_found]=2
-    #     fi
-    # else
-    #     issues_found=$((issues_found + 1))
-    #     ISSUE_FIXES[$issues_found]="check_github_known_hosts"
-    #     ISSUE_DESCRIPTIONS[$issues_found]="SSH known_hosts file missing"
-    #     ISSUE_PRIORITIES[$issues_found]=2
-    # fi
+    # Check for old backup format
+    if [ -d "/data/ssh_backup" ] && [ -f "/data/ssh_backup/metadata.txt" ]; then
+        if [ "$has_backup" = false ]; then
+            issues_found=$((issues_found + 1))
+            ISSUE_FIXES[$issues_found]="migrate_legacy_backup"
+            ISSUE_DESCRIPTIONS[$issues_found]="Legacy backup detected - migration"
+            ISSUE_PRIORITIES[$issues_found]=2
+        else
+            issues_found=$((issues_found + 1))
+            ISSUE_FIXES[$issues_found]="remove_legacy_backup"
+            ISSUE_DESCRIPTIONS[$issues_found]="Legacy backup detected - removal"
+            ISSUE_PRIORITIES[$issues_found]=3
+        fi
+    fi
 
-    # Check backup age if it exists
-    if [ "$backup_exists" = true ] && [ -f "/data/ssh_backup/metadata.txt" ]; then
-        local backup_date
-        backup_date=$(grep "Backup Date:" /data/ssh_backup/metadata.txt | cut -d: -f2- | xargs)
-        if [ -n "$backup_date" ]; then
-            local backup_age
-            local backup_days
-            backup_age=$(($(date +%s) - $(date -d "$backup_date" +%s)))
-            backup_days=$((backup_age / 86400))
-            if [ "$backup_days" -gt 30 ]; then
-                issues_found=$((issues_found + 1))
-                ISSUE_FIXES[$issues_found]="backup_ssh"
-                ISSUE_DESCRIPTIONS[$issues_found]="SSH backup is $backup_days days old - Consider updating"
-                ISSUE_PRIORITIES[$issues_found]=3
-            fi
+    # Check preferred backup location
+    if [ -f "$UTILITY_CONFIG_FILE" ]; then
+        local preferred_location
+        preferred_location=$(jq -r '.preferred_backup_location' "$UTILITY_CONFIG_FILE")
+        if [ "$preferred_location" = "null" ] || [ -z "$preferred_location" ]; then
+            issues_found=$((issues_found + 1))
+            ISSUE_FIXES[$issues_found]="set_preferred_backup_location"
+            ISSUE_DESCRIPTIONS[$issues_found]="No preferred backup location configured"
+            ISSUE_PRIORITIES[$issues_found]=3
         fi
     fi
 }
@@ -2608,7 +2992,7 @@ restart_cellular_radio() {
 manage_bluetooth() {
     clear
     echo "+----------------------------------------------+"
-    echo "|           Bluetooth Management               |"
+    echo "|             Bluetooth Management             |"
     echo "+----------------------------------------------+"
 
     # Check if bluetoothctl is available
@@ -2660,7 +3044,7 @@ device_controls_menu() {
     while true; do
         clear
         echo "+----------------------------------------------+"
-        echo "|           Device Controls                    |"
+        echo "|               Device Controls                |"
         echo "+----------------------------------------------+"
         echo "1. WiFi Network Management"
         echo "2. Restart Cellular Radio"
@@ -2751,31 +3135,31 @@ system_statistics_menu() {
     while true; do
         clear
         echo "+----------------------------------------------+"
-        echo "|           System Statistics                  |"
+        echo "|               System Statistics              |"
         echo "+----------------------------------------------+"
 
         echo "CPU Usage:"
-        echo "├─ $(get_cpu_stats)"
-        echo "├─ Top Processes by CPU:"
+        echo "├ $(get_cpu_stats)"
+        echo "├ Top Processes by CPU:"
         ps -eo cmd,%cpu --sort=-%cpu | head -4 | tail -3 |
             awk '{printf "│  %-40s %5.1f%%\n", substr($1,1,40), $NF}'
         echo ""
 
         echo "Memory Usage:"
-        echo "├─ $(get_memory_stats)"
-        echo "├─ Memory Details:"
+        echo "├ $(get_memory_stats)"
+        echo "├ Memory Details:"
         free -h | awk 'NR==2{printf "│  %-8s %8s %8s %8s %8s\n", "", "total", "used", "free", "cache"}'
         free -h | awk 'NR==2{printf "│  %-8s %8s %8s %8s %8s\n", "Mem:", $2, $3, $4, $6}'
         free -h | awk 'NR==3{printf "│  %-8s %8s %8s %8s\n", "Swap:", $2, $3, $4}'
         echo ""
 
         echo "Cellular Connection:"
-        echo "├─ $(get_cellular_stats)"
+        echo "├ $(get_cellular_stats)"
         if command -v mmcli >/dev/null 2>&1; then
             local modem_index
             modem_index=$(mmcli -L | grep -o '[0-9]*' | head -1)
             if [ -n "$modem_index" ]; then
-                echo "├─ Additional Details:"
+                echo "├ Additional Details:"
                 mmcli -m "$modem_index" | grep -E "operator name|signal quality|state|access tech|power state|packet service state" |
                     sed 's/^/│  /' | sed 's/|//'
             fi
@@ -2783,7 +3167,7 @@ system_statistics_menu() {
         echo ""
 
         echo "Disk Usage:"
-        echo "├─ Filesystem Details:"
+        echo "├ Filesystem Details:"
         df -h | grep -E '^/dev|Filesystem' |
             awk '{printf "│  %-15s %8s %8s %8s %8s\n", substr($1,length($1)>15?length($1)-15:0), $2, $3, $4, $5}'
         echo ""
@@ -2809,13 +3193,11 @@ system_statistics_menu() {
 
 display_main_menu() {
     clear
-    echo "+----------------------------------------------+"
-    echo "|       CommaUtility Script v$SCRIPT_VERSION"
-    echo "|       (Last Modified: $SCRIPT_MODIFIED)"
-    echo "+----------------------------------------------+"
+    echo "+----------------------------------------------------"
+    echo "|             CommaUtility Script v$SCRIPT_VERSION"
+    echo "|             (Last Modified: $SCRIPT_MODIFIED)"
+    echo "+----------------------------------------------------"
 
-    # Display System Status
-    # echo "| System Status:"
     display_os_info_short
     display_git_status_short
     display_disk_space_short
@@ -2829,7 +3211,7 @@ display_main_menu() {
     for i in "${!ISSUE_PRIORITIES[@]}"; do
         if [ "${ISSUE_PRIORITIES[$i]}" -eq 1 ]; then
             if [ "$critical_found" = false ]; then
-                echo "|----------------------------------------------|"
+                echo "|----------------------------------------------------"
                 echo -e "| ${RED}Critical Issues:${NC}"
                 critical_found=true
             fi
@@ -2842,7 +3224,7 @@ display_main_menu() {
     for i in "${!ISSUE_PRIORITIES[@]}"; do
         if [ "${ISSUE_PRIORITIES[$i]}" -eq 2 ]; then
             if [ "$warnings_found" = false ]; then
-                echo "|----------------------------------------------|"
+                echo "|----------------------------------------------------"
                 echo -e "| ${YELLOW}Warnings:${NC}"
                 warnings_found=true
             fi
@@ -2855,7 +3237,7 @@ display_main_menu() {
     for i in "${!ISSUE_PRIORITIES[@]}"; do
         if [ "${ISSUE_PRIORITIES[$i]}" -eq 3 ]; then
             if [ "$recommendations_found" = false ]; then
-                echo "|----------------------------------------------|"
+                echo "|----------------------------------------------------"
                 echo -e "| ${BLUE}Recommendations:${NC}"
                 recommendations_found=true
             fi
@@ -2864,7 +3246,7 @@ display_main_menu() {
     done
 
     # Close with a consistent bottom divider
-    echo "+----------------------------------------------+"
+    echo "+----------------------------------------------------"
 
     # Display Main Menu Options
     echo -e "\n${GREEN}Available Actions:${NC}"
@@ -2907,31 +3289,27 @@ handle_main_menu_input() {
     5) system_statistics_menu ;;
     6) device_controls_menu ;;
     7) toggle_boot_logo ;;
-    8) # Route Management
-        # Determine the path to the routes script (assumed to be in the same directory)
-        ROUTES_SCRIPT="$SCRIPT_DIR/CommaUtilityRoutes.sh"
-
-        # Check if the routes script exists; if not, download it
-        if [ ! -f "$ROUTES_SCRIPT" ]; then
-            print_info "CommaUtilityRoutes.sh not found. Downloading latest version..."
-            wget -O "$ROUTES_SCRIPT" "https://raw.githubusercontent.com/tonesto7/op-utilities/main/CommaUtilityRoutes.sh" &&
-                chmod +x "$ROUTES_SCRIPT" ||
-                {
-                    print_error "Failed to download CommaUtilityRoutes.sh"
-                    pause_for_user
-                }
+    8)
+        enable_routes_script
+        if [ -f "$ROUTES_SCRIPT" ]; then
+            "$ROUTES_SCRIPT"
+        else
+            print_error "CommaUtilityRoutes.sh not found. Please enable the routes script first."
+            pause_for_user
         fi
-
-        # Optionally, have the routes script check for updates itself
-        "$ROUTES_SCRIPT"
         ;;
-    [9-10] | [1-10][0-10])
-        # Calculate array index by adjusting for the 4 standard menu items
-        local fix_index=$((main_choice - 7))
-        if [ -n "${ISSUE_FIXES[$fix_index]}" ]; then
-            ${ISSUE_FIXES[$fix_index]}
+    [0-9] | [0-9][0-9])
+        # Calculate array index by adjusting for the 8 standard menu items
+        local fix_index=$((main_choice - 9))
+        # Get all indices of the associative arrays
+        local indices=(${!ISSUE_FIXES[@]})
+        if [ "$fix_index" -ge 0 ] && [ "$fix_index" -lt "${#indices[@]}" ]; then
+            # Get the actual index from the array of indices
+            local actual_index=${indices[$fix_index]}
+            ${ISSUE_FIXES[$actual_index]}
         else
             print_error "Invalid option"
+            pause_for_user
         fi
         ;;
     [uU]) update_script ;;
@@ -2943,7 +3321,7 @@ handle_main_menu_input() {
         ;;
     *)
         print_error "Invalid choice."
-        # pause_for_user
+        pause_for_user
         ;;
     esac
 }
@@ -2956,18 +3334,56 @@ handle_main_menu_input() {
 parse_arguments() {
     while [ $# -gt 0 ]; do
         case "$1" in
-        --import-ssh)
-            SCRIPT_ACTION="import-ssh"
+        # Backup operations
+        --backup)
+            SCRIPT_ACTION="backup"
             shift
             ;;
-        --private-key-file)
-            PRIVATE_KEY_FILE="$2"
+        --network)
+            NETWORK_ID="$2"
             shift 2
             ;;
-        --public-key-file)
-            PUBLIC_KEY_FILE="$2"
-            shift 2
+        --auto-sync)
+            AUTO_SYNC="true"
+            shift
             ;;
+        --restore-device)
+            SCRIPT_ACTION="restore_device"
+            shift
+            ;;
+        --set-backup-location)
+            SCRIPT_ACTION="set_backup_location"
+            shift
+            ;;
+        --migrate-backup)
+            SCRIPT_ACTION="migrate_backup"
+            shift
+            ;;
+
+        # SSH operations
+        --test-ssh)
+            SCRIPT_ACTION="test_ssh"
+            shift
+            ;;
+        --reset-ssh)
+            SCRIPT_ACTION="reset_ssh"
+            shift
+            ;;
+        --copy-ssh-persist)
+            SCRIPT_ACTION="copy_ssh_persist"
+            shift
+            ;;
+
+        # Network management
+        --manage-locations)
+            SCRIPT_ACTION="manage_locations"
+            shift
+            ;;
+        --manage-jobs)
+            SCRIPT_ACTION="manage_jobs"
+            shift
+            ;;
+
         # Build operations
         --build-dev)
             SCRIPT_ACTION="build-dev"
@@ -2993,6 +3409,7 @@ parse_arguments() {
             BUILD_BRANCH="$2"
             shift 2
             ;;
+
         # Clone operations
         --clone-public-bp)
             SCRIPT_ACTION="clone-public-bp"
@@ -3010,6 +3427,7 @@ parse_arguments() {
             SCRIPT_ACTION="custom-clone"
             shift
             ;;
+
         # System operations
         --update)
             SCRIPT_ACTION="update"
@@ -3027,23 +3445,7 @@ parse_arguments() {
             SCRIPT_ACTION="view-logs"
             shift
             ;;
-        # SSH operations
-        --test-ssh)
-            SCRIPT_ACTION="test-ssh"
-            shift
-            ;;
-        --backup-ssh)
-            SCRIPT_ACTION="backup-ssh"
-            shift
-            ;;
-        --restore-ssh)
-            SCRIPT_ACTION="restore-ssh"
-            shift
-            ;;
-        --reset-ssh)
-            SCRIPT_ACTION="reset-ssh"
-            shift
-            ;;
+
         # Git operations
         --git-pull)
             SCRIPT_ACTION="git-pull"
@@ -3058,6 +3460,14 @@ parse_arguments() {
             NEW_BRANCH="$2"
             shift 2
             ;;
+
+        # Remove deprecated options
+        --backup-ssh | --restore-ssh | --import-ssh)
+            print_error "Deprecated option. Please use --backup or --restore-device instead."
+            exit 1
+            ;;
+
+        # Help
         -h | --help)
             show_help
             exit 0
@@ -3161,10 +3571,44 @@ main() {
             reboot) reboot_device ;;
             shutdown) shutdown_device ;;
             view-logs) display_logs ;;
-            test-ssh) test_ssh_connection ;;
-            backup-ssh) backup_ssh ;;
-            restore-ssh) restore_ssh ;;
-            reset-ssh) reset_ssh ;;
+            backup)
+                if [ -n "$NETWORK_ID" ]; then
+                    perform_automated_backup "$NETWORK_ID"
+                else
+                    backup_device
+                fi
+                ;;
+            restore_device)
+                restore_backup
+                ;;
+            migrate_backup)
+                if [ -d "/data/ssh_backup" ] && [ -f "/data/ssh_backup/metadata.txt" ]; then
+                    migrate_legacy_backup
+                else
+                    print_error "No old backup format detected"
+                    exit 1
+                fi
+                ;;
+            set_backup_location)
+                set_preferred_backup_location
+                ;;
+            test_ssh)
+                test_ssh_connection
+                ;;
+            reset_ssh)
+                reset_ssh
+                ;;
+            copy_ssh_persist)
+                copy_ssh_config_and_keys
+                ;;
+            manage_locations)
+                ensure_routes_script
+                "$ROUTES_SCRIPT" --manage-network-locations-menu
+                ;;
+            manage_jobs)
+                ensure_routes_script
+                "$ROUTES_SCRIPT" --manage-jobs-menu
+                ;;
             import-ssh) import_ssh_keys $PRIVATE_KEY_FILE $PUBLIC_KEY_FILE ;;
             git-pull) fetch_pull_latest_changes ;;
             git-status) display_git_status ;;
