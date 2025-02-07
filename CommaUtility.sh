@@ -15,7 +15,7 @@
 # Global Variables
 ###############################################################################
 readonly SCRIPT_VERSION="2.4.2"
-readonly SCRIPT_MODIFIED="2025-01-22"
+readonly SCRIPT_MODIFIED="2025-02-06"
 
 # We unify color-coded messages in a single block for consistency:
 readonly RED='\033[0;31m'
@@ -2875,9 +2875,10 @@ display_main_menu() {
     echo "5. System Statistics"
     echo "6. Device Controls"
     echo "7. Modify Boot Icon/Logo"
+    echo "8. Route Management"
 
     # Dynamic fix options
-    local fix_number=8 # Start from 6 because we already have 5 options
+    local fix_number=9 # Start from 6 because we already have 5 options
     for i in "${!ISSUE_FIXES[@]}"; do
         local color=""
         case "${ISSUE_PRIORITIES[$i]}" in
@@ -2906,7 +2907,25 @@ handle_main_menu_input() {
     5) system_statistics_menu ;;
     6) device_controls_menu ;;
     7) toggle_boot_logo ;;
-    [8-10] | [1-10][0-10])
+    8) # Route Management
+        # Determine the path to the routes script (assumed to be in the same directory)
+        ROUTES_SCRIPT="$SCRIPT_DIR/CommaUtilityRoutes.sh"
+
+        # Check if the routes script exists; if not, download it
+        if [ ! -f "$ROUTES_SCRIPT" ]; then
+            print_info "CommaUtilityRoutes.sh not found. Downloading latest version..."
+            wget -O "$ROUTES_SCRIPT" "https://raw.githubusercontent.com/tonesto7/op-utilities/main/CommaUtilityRoutes.sh" &&
+                chmod +x "$ROUTES_SCRIPT" ||
+                {
+                    print_error "Failed to download CommaUtilityRoutes.sh"
+                    pause_for_user
+                }
+        fi
+
+        # Optionally, have the routes script check for updates itself
+        "$ROUTES_SCRIPT"
+        ;;
+    [9-10] | [1-10][0-10])
         # Calculate array index by adjusting for the 4 standard menu items
         local fix_index=$((main_choice - 7))
         if [ -n "${ISSUE_FIXES[$fix_index]}" ]; then
