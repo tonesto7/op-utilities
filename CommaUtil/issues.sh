@@ -3,7 +3,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly ISSUES_SCRIPT_VERSION="3.0.1"
+readonly ISSUES_SCRIPT_VERSION="3.0.2"
 readonly ISSUES_SCRIPT_MODIFIED="2025-02-08"
 
 # Array-based detection data

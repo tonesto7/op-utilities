@@ -3,7 +3,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly ROUTES_SCRIPT_VERSION="3.0.1"
+readonly ROUTES_SCRIPT_VERSION="3.0.2"
 readonly ROUTES_SCRIPT_MODIFIED="2025-02-08"
 
 # Routes Related Constants

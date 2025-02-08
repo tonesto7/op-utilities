@@ -3,40 +3,12 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly TRANSFERS_SCRIPT_VERSION="3.0.1"
+readonly TRANSFERS_SCRIPT_VERSION="3.0.2"
 readonly TRANSFERS_SCRIPT_MODIFIED="2025-02-08"
 
 ###############################################################################
 # Transfer Management Functions
 ###############################################################################
-
-# Prerequisites Check
-check_prerequisites() {
-    local errors=0
-
-    # Check required commands
-    for cmd in jq rsync smbclient tar wget; do
-        if ! command -v "$cmd" >/dev/null 2>&1; then
-            print_error "Required command not found: $cmd"
-            errors=$((errors + 1))
-        fi
-    done
-
-    # Check required directories
-    for dir in "$ROUTES_DIR" "$CONFIG_DIR" "$CREDENTIALS_DIR"; do
-        if [ ! -d "$dir" ]; then
-            mkdir -p "$dir"
-        fi
-    done
-
-    # Check write permissions
-    if [ ! -w "$CONFIG_DIR" ]; then
-        print_error "No write permission for $CONFIG_DIR"
-        errors=$((errors + 1))
-    fi
-
-    return $errors
-}
 
 verify_network_connectivity() {
     local type="$1"

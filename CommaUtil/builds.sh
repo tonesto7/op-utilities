@@ -3,7 +3,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly BUILDS_SCRIPT_VERSION="3.0.1"
+readonly BUILDS_SCRIPT_VERSION="3.0.2"
 readonly BUILDS_SCRIPT_MODIFIED="2025-02-08"
 
 # Variables from build_bluepilot script

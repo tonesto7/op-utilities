@@ -3,7 +3,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly BACKUPS_SCRIPT_VERSION="3.0.1"
+readonly BACKUPS_SCRIPT_VERSION="3.0.2"
 readonly BACKUPS_SCRIPT_MODIFIED="2025-02-08"
 
 # Device Backup Related Constants
@@ -71,9 +71,9 @@ display_backup_status_short() {
         status=${status:-"Invalid"}
 
         if [ "$status" = "Valid" ]; then
-            echo -e "│ ├─ Network: ${GREEN}$label (Connected)${NC}"
+            echo -e "│ ├─ Network Location: ${GREEN}$label (Connected)${NC}"
         else
-            echo -e "│ ├─ Network: ${RED}$label (Disconnected)${NC}"
+            echo -e "│ ├─ Network Location: ${RED}$label (Disconnected)${NC}"
         fi
 
         if [ -n "$backup_job" ]; then
@@ -82,13 +82,13 @@ display_backup_status_short() {
             echo -e "│ ├─ Auto-Backup: ${YELLOW}Disabled${NC}"
         fi
     else
-        echo -e "│ ├─ Network: ${YELLOW}Not Configured${NC}"
+        echo -e "│ ├─ Network Location: ${YELLOW}Not Configured${NC}"
         echo -e "│ ├─ Auto-Backup: ${RED}Not Available${NC}"
     fi
 
     # Find backup
     if [ ! -d "$BACKUP_BASE_DIR" ]; then
-        echo -e "│ └─ ${RED}No backup found${NC}"
+        echo -e "│ └─ Status: ${RED}No backup found${NC}"
         return
     fi
 

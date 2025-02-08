@@ -12,7 +12,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly SCRIPT_VERSION="3.0.1"
+readonly SCRIPT_VERSION="3.0.2"
 readonly SCRIPT_MODIFIED="2025-02-08"
 readonly SCRIPT_BRANCH="test"
 
@@ -321,18 +321,20 @@ check_prerequisites() {
     local errors=0
     echo -e "│ Checking Prerequisites..."
 
-    # check for smbclient
-    if ! command -v smbclient >/dev/null 2>&1; then
-        echo -ne "│ ${YELLOW}smbclient is not installed${NC} | Installing (might take a moment)...\r\033[K"
-        # Quietly install smbclient
-        sudo apt update && sudo apt install -y smbclient >/dev/null 2>&1
-        if ! command -v smbclient >/dev/null 2>&1; then
-            echo -e "│ ${RED}Failed to install smbclient${NC}"
-            # errors=$((errors + 1))
-        else
-            echo -e "│ ${GREEN}SMBClient Installed Successfully${NC}"
+    # Check required commands
+    for cmd in jq rsync smbclient tar wget; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            echo -ne "│ ${YELLOW}smbclient is not installed${NC} | Installing (might take a moment)...\r\033[K"
+            # Quietly install smbclient
+            sudo apt update && sudo apt install -y "$cmd" >/dev/null 2>&1
+            if ! command -v "$cmd" >/dev/null 2>&1; then
+                echo -e "│ ${RED}Failed to install $cmd${NC}"
+                errors=$((errors + 1))
+            else
+                echo -e "│ ${GREEN}$cmd Installed Successfully${NC}"
+            fi
         fi
-    fi
+    done
 
     # Check disk space in /data
     local available_space
@@ -348,22 +350,19 @@ check_prerequisites() {
         errors=$((errors + 1))
     fi
 
-    # Check git installation
-    if ! command -v git >/dev/null 2>&1; then
-        echo -ne "│ ${YELLOW}Git is not installed${NC} | Installing...\r\033[K"
-        sudo apt update && sudo apt install -y git >/dev/null 2>&1
-        if ! command -v git >/dev/null 2>&1; then
-            echo -e "│ ${RED}Failed to install git${NC}"
-            errors=$((errors + 1))
-        else
-            echo -e "│ ${GREEN}Git Installed Successfully${NC}"
-        fi
+    # Check write permissions
+    if [ ! -w "$CONFIG_DIR" ]; then
+        echo -e "│ ${RED}No write permission for $CONFIG_DIR${NC}"
+        errors=$((errors + 1))
     fi
 
     if [ $errors -gt 0 ]; then
         echo -e "│ ${YELLOW}Some prerequisites checks failed. Some features may not work correctly.${NC}"
         pause_for_user
     fi
+
+    # Make sure important directories exist and are created
+    mkdir -p "$BACKUP_BASE_DIR" "$CONFIG_DIR" "$CREDENTIALS_DIR" "$TRANSFER_STATE_DIR"
 
     return $errors
 }

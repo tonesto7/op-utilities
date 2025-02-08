@@ -3,7 +3,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly SSH_SCRIPT_VERSION="3.0.1"
+readonly SSH_SCRIPT_VERSION="3.0.2"
 readonly SSH_SCRIPT_MODIFIED="2025-02-08"
 
 # Array to store SSH status
@@ -68,7 +68,7 @@ display_ssh_status_short() {
             echo -e "│ └─ Key: ${GREEN}Found${NC} (Not Backed Up)"
         fi
     else
-        echo -e "${RED}| └─ Key: Not Found${NC}"
+        echo -e "| └─ Key: ${RED}Not Found${NC}"
     fi
 }
 
