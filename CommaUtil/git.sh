@@ -34,7 +34,10 @@ display_git_status() {
         # echo "│ Gathering repository details, please wait..."
 
         (
-            cd "/data/openpilot" || exit 1
+            cd "/data/openpilot" 2>/dev/null || {
+                print_error "Could not access openpilot directory"
+                return 1
+            }
             local branch_name
             local repo_url
             local repo_status
@@ -72,7 +75,7 @@ display_git_status() {
             echo -e "│ └─ Submodules: $submodule_status"
         )
     else
-        echo "│ Openpilot directory: ❌"
+        echo "│ Openpilot directory: ❌ Missing"
     fi
 }
 

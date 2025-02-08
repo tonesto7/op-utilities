@@ -374,7 +374,7 @@ manage_auto_sync_and_backup_jobs() {
             echo -e "│ Route Sync: ${RED}No Location Configured${NC}"
         fi
 
-        # Show Backup Status
+        # Show Device Backup Status
         local backup_loc backup_job
         backup_loc=$(jq -r '.locations[] | select(.type == "device_backup")' "$NETWORK_CONFIG")
         backup_job=$(grep -A1 "^### Start CommaUtility Backup" "$LAUNCH_ENV")
@@ -799,6 +799,10 @@ sync_backup_to_network() {
         return 1
     fi
 
+    # Set up single backup path
+    local device_id=$(get_device_id)
+    local remote_path="${path%/}/${device_id}/backup"
+
     # Transfer the backup
     if ! transfer_backup "$backup_dir" "$location_id"; then
         print_error "Backup transfer failed"
@@ -1111,6 +1115,10 @@ transfer_backup_smb() {
 
     print_info "Transferring backup to SMB location..."
 
+    # First remove any existing backup at the remote location
+    smbclient "//${server}/${share}" -U "${username}%${password}" \
+        -c "deltree \"$remote_path\"" >/dev/null 2>&1
+
     # Create remote directory
     smbclient "//${server}/${share}" -U "${username}%${password}" \
         -c "mkdir \"$remote_path\"" >/dev/null 2>&1
@@ -1140,9 +1148,9 @@ transfer_backup_ssh() {
 
     print_info "Transferring backup to SSH location..."
 
-    # Create remote directory
-    ssh -p "$port" "$username@$server" "mkdir -p '$remote_path'" || {
-        print_error "Failed to create remote directory"
+    # Remove existing backup directory and create new one
+    ssh -p "$port" "$username@$server" "rm -rf '$remote_path' && mkdir -p '$remote_path'" || {
+        print_error "Failed to prepare remote directory"
         return 1
     }
 
@@ -1184,8 +1192,8 @@ fetch_backup() {
     username=$(echo "$json_location" | jq -r .username)
     device_id=$(get_device_id)
 
-    # Build remote path
-    local remote_path="${path%/}/${device_id}/backups"
+    # Build remote path for single backup
+    local remote_path="${path%/}/${device_id}/backup"
 
     case "$type" in
     smb)
@@ -1236,7 +1244,6 @@ fetch_backup() {
             fi
         fi
         ;;
-
     *)
         print_error "Invalid location type: $type"
         return 1

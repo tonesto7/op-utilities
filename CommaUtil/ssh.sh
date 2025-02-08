@@ -85,8 +85,8 @@ display_ssh_status() {
     local expected_permissions="-rw-------"
     ssh_status=()
 
-    # Check main key
-    check_file_permissions_owner "/home/comma/.ssh/github" "$expected_permissions" "$expected_owner"
+    # Check file with proper error handling
+    check_file_permissions_owner "/home/comma/.ssh/github" "-rw-------" "comma"
     local ssh_check_result=$?
 
     if [ "$ssh_check_result" -eq 0 ]; then
@@ -98,10 +98,8 @@ display_ssh_status() {
         fi
     elif [ "$ssh_check_result" -eq 1 ]; then
         echo -e "${NC}|${RED} SSH key in ~/.ssh/: ❌ (permissions/ownership mismatch)${NC}"
-        ssh_status+=("fix_permissions")
     else
         echo -e "${NC}|${RED} SSH key in ~/.ssh/: ❌ (missing)${NC}"
-        ssh_status+=("missing")
     fi
 
     # Find most recent backup
