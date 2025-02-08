@@ -11,15 +11,24 @@ readonly DEVICE_SCRIPT_MODIFIED="2025-02-08"
 ###############################################################################
 
 display_os_info_short() {
-    local agnos_version
-    local build_time
-    agnos_version=$(cat /VERSION 2>/dev/null)
-    build_time=$(awk 'NR==2' /BUILD 2>/dev/null)
+    local agnos_version="" build_time=""
+    # Safely read AGNOS version with fallback
+    if [ -f "/VERSION" ]; then
+        agnos_version=$(cat /VERSION 2>/dev/null || echo "Unknown")
+        build_time=$(awk 'NR==2' /BUILD 2>/dev/null || echo "Unknown")
+    fi
+
     print_info "│ System Information:"
-    print_info "│ ├─ AGNOS: $agnos_version ($build_time)"
-    print_info "│ ├─ Hardware Serial: $(get_device_id)"
-    print_info "│ ├─ Panda Dongle ID: $(get_dongle_id)"
-    print_info "│ └─ WiFi MAC Address: $(get_wifi_mac)"
+    print_info "│ ├─ AGNOS: ${agnos_version:-Unknown} (${build_time:-Unknown})"
+
+    local hardware_serial dongle_id wifi_mac
+    hardware_serial=$(cat /data/params/d/HardwareSerial 2>/dev/null || echo "Unknown")
+    dongle_id=$(cat /data/params/d/DongleId 2>/dev/null || echo "Unknown")
+    wifi_mac=$(cat /sys/class/net/wlan0/address 2>/dev/null || echo "Unknown")
+
+    print_info "│ ├─ Hardware Serial: ${hardware_serial}"
+    print_info "│ ├─ Panda Dongle ID: ${dongle_id}"
+    print_info "│ └─ WiFi MAC Address: ${wifi_mac}"
 }
 
 display_general_status() {

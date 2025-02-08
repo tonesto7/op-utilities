@@ -32,9 +32,15 @@ detect_issues() {
 
     if [ -n "$latest_backup" ] && [ -f "${latest_backup}/${BACKUP_METADATA_FILE}" ]; then
         has_backup=true
+        # Try to get timestamp from metadata, fall back to directory stat if fails
         local backup_timestamp
-        backup_timestamp=$(jq -r '.timestamp' "${latest_backup}/${BACKUP_METADATA_FILE}")
-        backup_age_days=$((($(date +%s) - $(date -d "$backup_timestamp" +%s)) / 86400))
+        if backup_timestamp=$(jq -r '.timestamp // empty' "${latest_backup}/${BACKUP_METADATA_FILE}" 2>/dev/null) &&
+            [ -n "$backup_timestamp" ] && [ "$backup_timestamp" != "null" ]; then
+            backup_age_days=$((($(date +%s) - $(date -d "$backup_timestamp" +%s)) / 86400))
+        else
+            backup_timestamp=$(stat -c %Y "$latest_backup")
+            backup_age_days=$((($(date +%s) - backup_timestamp) / 86400))
+        fi
     fi
 
     # Check SSH files status
@@ -65,18 +71,6 @@ detect_issues() {
         ISSUE_DESCRIPTIONS[$issues_found]="Device backup is $backup_age_days days old"
         ISSUE_PRIORITIES[$issues_found]=3
     fi
-
-    # Check preferred network backup location
-    # if [ -f "$NETWORK_CONFIG" ]; then
-    #     local backup_loc
-    #     backup_loc=$(jq -r '.locations[] | select(.type == "device_backup")' "$NETWORK_CONFIG")
-    #     if [ -z "$backup_loc" ] || [ "$backup_loc" = "null" ]; then
-    #         issues_found=$((issues_found + 1))
-    #         ISSUE_FIXES[$issues_found]="set_preferred_backup_location"
-    #         ISSUE_DESCRIPTIONS[$issues_found]="No preferred network backup location configured"
-    #         ISSUE_PRIORITIES[$issues_found]=3
-    #     fi
-    # fi
 
     # Check for old backup format
     if [ -d "/data/ssh_backup" ] && [ -f "/data/ssh_backup/metadata.txt" ]; then

@@ -53,7 +53,20 @@ test_ssh_connection() {
 display_ssh_status_short() {
     print_info "│ SSH Status:"
     if [ -f "/home/comma/.ssh/github" ]; then
-        echo "│ └─ Key: Found"
+        local latest_backup
+        latest_backup=$(find "$BACKUP_BASE_DIR" -mindepth 1 -maxdepth 1 -type d -exec stat -c "%Y %n" {} \; 2>/dev/null | sort -nr | head -n1 | cut -d' ' -f2)
+
+        if [ -n "$latest_backup" ] && [ -d "${latest_backup}/ssh" ] && [ -f "${latest_backup}/ssh/backup.tar.gz" ]; then
+            local ssh_file_count
+            ssh_file_count=$(tar -tzf "${latest_backup}/ssh/backup.tar.gz" 2>/dev/null | wc -l || echo 0)
+            if [ "$ssh_file_count" -gt 0 ]; then
+                echo -e "│ └─ Key: ${GREEN}Found (Backed Up)${NC}"
+            else
+                echo -e "│ └─ Key: ${GREEN}Found${NC} (Not Backed Up)"
+            fi
+        else
+            echo -e "│ └─ Key: ${GREEN}Found${NC} (Not Backed Up)"
+        fi
     else
         echo -e "${RED}| └─ Key: Not Found${NC}"
     fi
@@ -118,7 +131,7 @@ display_ssh_status() {
             if jq -e '.directories[] | select(.type=="ssh") | select(.files | tonumber > 0)' "${latest_backup}/${BACKUP_METADATA_FILE}" >/dev/null; then
                 echo -e "│  └─ SSH files included in backup"
             else
-                echo -e "${NC}|${YELLOW}  └─ Warning: SSH files not included in backup${NC}"
+                echo -e "|  └─${YELLOW} Warning: SSH files not included in backup${NC}"
             fi
         fi
     else

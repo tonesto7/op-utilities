@@ -78,10 +78,10 @@ readonly MODULES=("backups.sh" "ssh.sh" "transfers.sh" "comma.sh" "storage.sh" "
 
 display_main_menu() {
     clear
-    echo "+----------------------------------------------------"
+    echo "┌────────────────────────────────────────────────────"
     echo "│             CommaUtility Script v$SCRIPT_VERSION"
     echo "│             (Last Modified: $SCRIPT_MODIFIED)"
-    echo "+----------------------------------------------------"
+    echo "└────────────────────────────────────────────────────"
 
     display_os_info_short
     display_backup_status_short
@@ -97,7 +97,7 @@ display_main_menu() {
     for i in "${!ISSUE_PRIORITIES[@]}"; do
         if [ "${ISSUE_PRIORITIES[$i]}" -eq 1 ]; then
             if [ "$critical_found" = false ]; then
-                echo "│----------------------------------------------------"
+                echo "│────────────────────────────────────────────────────"
                 echo -e "│ ${RED}Critical Issues:${NC}"
                 critical_found=true
             fi
@@ -110,7 +110,7 @@ display_main_menu() {
     for i in "${!ISSUE_PRIORITIES[@]}"; do
         if [ "${ISSUE_PRIORITIES[$i]}" -eq 2 ]; then
             if [ "$warnings_found" = false ]; then
-                echo "│----------------------------------------------------"
+                echo "│────────────────────────────────────────────────────"
                 echo -e "│ ${YELLOW}Warnings:${NC}"
                 warnings_found=true
             fi
@@ -123,7 +123,7 @@ display_main_menu() {
     for i in "${!ISSUE_PRIORITIES[@]}"; do
         if [ "${ISSUE_PRIORITIES[$i]}" -eq 3 ]; then
             if [ "$recommendations_found" = false ]; then
-                echo "│----------------------------------------------------"
+                echo "│────────────────────────────────────────────────────"
                 echo -e "│ ${BLUE}Recommendations:${NC}"
                 recommendations_found=true
             fi
@@ -132,19 +132,20 @@ display_main_menu() {
     done
 
     # Close with a consistent bottom divider
-    echo "+----------------------------------------------------"
+    echo "├────────────────────────────────────────────────────"
 
     # Display Main Menu Options
-    echo -e "\n${GREEN}Available Actions:${NC}"
-    echo "1. SSH Key Management"
-    echo "2. Device Backup"
-    echo "3. Repository & Build Tools"
-    echo "4. View Logs"
-    echo "5. View Recent Error"
-    echo "6. System Statistics"
-    echo "7. Device Controls"
-    echo "8. Modify Boot Icon/Logo"
-    echo "9. Route & Transfer Management"
+    echo "│"
+    echo -e "│${GREEN} Available Actions:${NC}"
+    echo "│ 1. SSH Key Management"
+    echo "│ 2. Device Backup"
+    echo "│ 3. Repository & Build Tools"
+    echo "│ 4. View Logs"
+    echo "│ 5. View Recent Error"
+    echo "│ 6. System Statistics"
+    echo "│ 7. Device Controls"
+    echo "│ 8. Modify Boot Icon/Logo"
+    echo "│ 9. Route & Transfer Management"
 
     # Dynamic fix options
     local fix_number=10 # Start from 6 because we already have 5 options
@@ -156,14 +157,15 @@ display_main_menu() {
         3) color="$BLUE" ;;
         *) color="$NC" ;;
         esac
-        echo -e "${fix_number}. ${color}Fix: ${ISSUE_DESCRIPTIONS[$i]}${NC}"
+        echo -e "│ ${fix_number}. ${color}Fix: ${ISSUE_DESCRIPTIONS[$i]}${NC}"
         fix_number=$((fix_number + 1))
     done
 
-    echo "R. Reboot Device"
-    echo "S. Shutdown Device"
-    echo "U. Update Script"
-    echo "Q. Exit"
+    echo "│ R. Reboot Device"
+    echo "│ S. Shutdown Device"
+    echo "│ U. Update Script"
+    echo "│ Q. Exit"
+    echo "└────────────────────────────────────────────────────"
 }
 
 handle_main_menu_input() {
@@ -737,13 +739,13 @@ main() {
 ###############################################################################
 run_script() {
 
-    echo -e "+-------------------------------------------------"
+    echo -e "┌────────────────────────────────────────────────────"
     # Update the main script to the latest version
     update_main_script
-    echo -e "+-------------------------------------------------"
+    echo -e "├────────────────────────────────────────────────────"
     # Load all modules and check for updates
     load_modules
-    echo -e "+-------------------------------------------------"
+    echo -e "├────────────────────────────────────────────────────"
     # Check for prerequisites
     if ! check_prerequisites; then
         print_error "Prerequisite Checks Failed.\nPlease fix the above errors."
@@ -751,13 +753,13 @@ run_script() {
     else
         echo -e "│ ${GREEN}All prerequisites checks passed.${NC}"
     fi
-    echo -e "+-------------------------------------------------"
+    echo -e "├────────────────────────────────────────────────────"
 
     # Initialize the network location config
     init_network_config
 
     echo -e "│ Initialization complete.  Showing main menu..."
-    echo -e "+-------------------------------------------------"
+    echo -e "└────────────────────────────────────────────────────"
 
     # Wait for 10 seconds before continuing
     sleep 3

@@ -37,12 +37,16 @@ mount_rw() {
 
 display_disk_space_status_short() {
     print_info "│ Disk Space:"
-    local data_usage_root
-    local data_usage_data
-    data_usage_root=$(df -h / | awk 'NR==2 {printf "Used: %s/%s (%s)", $3, $2, $5}')
-    data_usage_data=$(df -h /data | awk 'NR==2 {printf "Used: %s/%s (%s)", $3, $2, $5}')
-    echo "│ ├─ (/):     $data_usage_root"
-    echo "│ └─ (/data): $data_usage_data"
+    local root_usage data_usage
+
+    # Safely get root usage
+    root_usage=$(df -h / 2>/dev/null | awk 'NR==2 {printf "Used: %s/%s (%s)", $3, $2, $5}' || echo "Unknown")
+
+    # Safely get data usage
+    data_usage=$(df -h /data 2>/dev/null | awk 'NR==2 {printf "Used: %s/%s (%s)", $3, $2, $5}' || echo "Unknown")
+
+    echo "│ ├─ (/):     ${root_usage}"
+    echo "│ └─ (/data): ${data_usage}"
 }
 
 ###############################################################################

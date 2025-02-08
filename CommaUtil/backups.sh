@@ -47,24 +47,28 @@ has_legacy_backup() {
 
 display_backup_status_short() {
     print_info "│ Backup Status:"
-    # Check network location configuration
+
+    # Check network location configuration safely
     local backup_loc backup_job
-    backup_loc=$(get_backup_location)
-    backup_job=$(get_backup_job)
+    if [ -f "$NETWORK_CONFIG" ]; then
+        backup_loc=$(jq -r '.locations[] | select(.type == "device_backup")' "$NETWORK_CONFIG" 2>/dev/null)
+    fi
+
+    if [ -f "$LAUNCH_ENV" ]; then
+        backup_job=$(grep -A1 "^### Start CommaUtility Backup" "$LAUNCH_ENV" 2>/dev/null)
+    fi
+
     if [ -n "$backup_loc" ]; then
         local label protocol status
-        label=$(echo "$backup_loc" | jq -r .label)
-        protocol=$(echo "$backup_loc" | jq -r .protocol)
+        label=$(echo "$backup_loc" | jq -r '.label // "Unknown"')
+        protocol=$(echo "$backup_loc" | jq -r '.protocol // "Unknown"')
 
-        # Store the connection test result in the status variable
-        if [ "$protocol" = "smb" ]; then
-            status=$(test_smb_connection "$backup_loc")
+        status=$(if [ "$protocol" = "smb" ]; then
+            test_smb_connection "$backup_loc"
         else
-            status=$(test_ssh_connection "$backup_loc")
-        fi
-
-        # Trim whitespace/newlines from status
-        status=$(echo "$status" | xargs)
+            test_ssh_connection "$backup_loc"
+        fi)
+        status=${status:-"Invalid"}
 
         if [ "$status" = "Valid" ]; then
             echo -e "│ ├─ Network: ${GREEN}$label (Connected)${NC}"
@@ -82,15 +86,29 @@ display_backup_status_short() {
         echo -e "│ ├─ Auto-Backup: ${RED}Not Available${NC}"
     fi
 
-    ## Find most recent backup with a small delay to allow for file system updates
-    sleep 1 # Add small delay to ensure file system is updated
+    # Find most recent backup safely
+    if [ ! -d "$BACKUP_BASE_DIR" ]; then
+        echo -e "│ └─ ${RED}No backups found${NC}"
+        return
+    fi
+
     local latest_backup
-    latest_backup=$(find "$BACKUP_BASE_DIR" -mindepth 1 -maxdepth 1 -type d -exec stat -c "%Y %n" {} \; | sort -nr | head -n1 | cut -d' ' -f2)
+    latest_backup=$(find "$BACKUP_BASE_DIR" -mindepth 1 -maxdepth 1 -type d -exec stat -c "%Y %n" {} \; 2>/dev/null | sort -nr | head -n1 | cut -d' ' -f2)
 
     if [ -n "$latest_backup" ] && [ -f "${latest_backup}/${BACKUP_METADATA_FILE}" ]; then
         local backup_timestamp backup_age_days backup_size
-        backup_timestamp=$(jq -r '.timestamp' "${latest_backup}/${BACKUP_METADATA_FILE}")
-        backup_age_days=$((($(date +%s) - $(date -d "$backup_timestamp" +%s)) / 86400))
+
+        # Safely parse the timestamp with error checking
+        if backup_timestamp=$(jq -r '.timestamp' "${latest_backup}/${BACKUP_METADATA_FILE}" 2>/dev/null) &&
+            [ -n "$backup_timestamp" ] && [ "$backup_timestamp" != "null" ]; then
+            backup_age_days=$((($(date +%s) - $(date -d "$backup_timestamp" +%s)) / 86400))
+            formatted_date=$(date -d "$backup_timestamp" "+%Y-%m-%d %H:%M" 2>/dev/null)
+        else
+            backup_timestamp=$(stat -c %y "$latest_backup")
+            backup_age_days=0
+            formatted_date=$(date -d "$backup_timestamp" "+%Y-%m-%d %H:%M" 2>/dev/null)
+        fi
+
         backup_size=$(du -sh "$latest_backup" | cut -f1)
 
         # Count total number of backups
@@ -99,13 +117,21 @@ display_backup_status_short() {
         max_label="${total_backups}/${MAX_BACKUP_COUNT}"
         total_size=$(du -sh "$BACKUP_BASE_DIR" | cut -f1)
 
-        # Get backup contents summary
-        local ssh_files params_files commautil_files
-        ssh_files=$(jq -r '.directories[] | select(.type=="ssh") | .files' "${latest_backup}/${BACKUP_METADATA_FILE}")
-        params_files=$(jq -r '.directories[] | select(.type=="params") | .files' "${latest_backup}/${BACKUP_METADATA_FILE}")
-        commautil_files=$(jq -r '.directories[] | select(.type=="commautil") | .files' "${latest_backup}/${BACKUP_METADATA_FILE}")
+        # Get component counts with safe defaults
+        local ssh_files=0 params_files=0 commautil_files=0
 
-        echo "│ ├─ Latest: $(date -d "$backup_timestamp" "+%Y-%m-%d %H:%M")"
+        # Use grep to count actual files in the backup directories instead of relying on metadata
+        if [ -d "${latest_backup}/ssh" ]; then
+            ssh_files=$(tar -tzf "${latest_backup}/ssh/backup.tar.gz" 2>/dev/null | wc -l)
+        fi
+        if [ -d "${latest_backup}/params" ]; then
+            params_files=$(tar -tzf "${latest_backup}/params/backup.tar.gz" 2>/dev/null | wc -l)
+        fi
+        if [ -d "${latest_backup}/commautil" ]; then
+            commautil_files=$(tar -tzf "${latest_backup}/commautil/backup.tar.gz" 2>/dev/null | wc -l)
+        fi
+
+        echo "│ ├─ Latest: ${formatted_date}"
         if [ "$backup_age_days" -gt 30 ]; then
             echo -e "│ ├─ Age: ${YELLOW}${backup_age_days} days old${NC}"
         else
@@ -152,11 +178,16 @@ backup_device() {
 
     # Backup SSH files
     if [ -d "/home/comma/.ssh" ]; then
+        mkdir -p "${backup_dir}/ssh"
         tar czf "${backup_dir}/ssh/backup.tar.gz" -C "/home/comma/.ssh" . || backup_success=false
         if [ "$backup_success" = true ]; then
-            local file_count=$(find "/home/comma/.ssh" -type f | wc -l)
-            local size=$(du -b "${backup_dir}/ssh/backup.tar.gz" | cut -f1)
-            component_stats=$(jq -n --arg type "ssh" --arg files "$file_count" --arg size "$size" \
+            local file_count
+            # Count all files in .ssh directory, excluding . and ..
+            file_count=$(find "/home/comma/.ssh" -type f | wc -l)
+            component_stats=$(jq -n \
+                --arg type "ssh" \
+                --arg files "$file_count" \
+                --arg size "$(du -b "${backup_dir}/ssh/backup.tar.gz" | cut -f1)" \
                 '{type: $type, files: $files, size: $size}')
             stats+=("$component_stats")
         fi
@@ -210,9 +241,8 @@ backup_device() {
             echo "Backup location: $backup_dir"
 
             # Only offer network sync in interactive mode
-            local backup_loc backup_job
-            backup_loc=$(get_backup_location)
-            backup_job=$(get_backup_job)
+            local backup_loc
+            backup_loc=$(jq -r '.locations[] | select(.type == "device_backup")' "$NETWORK_CONFIG")
 
             if [ -n "$backup_loc" ] && [ "$backup_loc" != "null" ]; then
                 read -p "Would you like to sync this backup to the configured network location? (y/N): " sync_choice
@@ -362,6 +392,15 @@ create_backup_metadata() {
     shift 3
     local stats=("$@")
 
+    # Ensure proper JSON array formatting for stats
+    local stats_json
+    if [ ${#stats[@]} -gt 0 ]; then
+        stats_json=$(printf '%s,' "${stats[@]}" | sed 's/,$//')
+    else
+        stats_json='[]'
+    fi
+
+    # Create metadata with properly formatted JSON
     cat >"${backup_dir}/${BACKUP_METADATA_FILE}" <<EOF
 {
     "backup_id": "${backup_name}",
@@ -370,11 +409,17 @@ create_backup_metadata() {
     "script_version": "${SCRIPT_VERSION}",
     "agnos_version": "$(cat /VERSION 2>/dev/null)",
     "directories": [
-        $(printf "%s," "${stats[@]}" | sed 's/,$//')
+        ${stats_json}
     ],
     "total_size": "$(du -sh "${backup_dir}" | cut -f1)"
 }
 EOF
+
+    # Verify the JSON is valid
+    if ! jq '.' "${backup_dir}/${BACKUP_METADATA_FILE}" >/dev/null 2>&1; then
+        print_error "Generated metadata file is not valid JSON"
+        return 1
+    fi
 }
 
 restore_from_backup() {

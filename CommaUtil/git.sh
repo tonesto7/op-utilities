@@ -14,16 +14,18 @@ display_git_status_short() {
     print_info "│ Openpilot Repository:"
     if [ -d "/data/openpilot" ]; then
         (
-            cd "/data/openpilot" || return
-            local repo_name
-            local branch_name
-            repo_name=$(git config --get remote.origin.url | awk -F'/' '{print $NF}' | sed 's/.git//')
-            branch_name=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-            echo "│ ├─ Repository: $repo_name"
-            echo "│ └─ Branch: $branch_name"
+            cd "/data/openpilot" 2>/dev/null || {
+                echo -e "${RED}| └─ Repository: Access Error${NC}"
+                return
+            }
+            local repo_name branch_name
+            repo_name=$(git config --get remote.origin.url 2>/dev/null | awk -F'/' '{print $NF}' | sed 's/.git//' || echo "Unknown")
+            branch_name=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "Unknown")
+            echo "│ ├─ Repository: ${repo_name}"
+            echo "│ └─ Branch: ${branch_name}"
         )
     else
-        echo -e "${YELLOW}| └─ Repository: Missing${NC}"
+        echo -e "${YELLOW}| └─ Repository: Not Installed${NC}"
     fi
 }
 

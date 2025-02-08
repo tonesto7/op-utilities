@@ -120,8 +120,14 @@ clear_transfer_state() {
 
 # Cleanup Functions
 cleanup_temp_files() {
-    rm -rf "$CONCAT_DIR"/*
-    rm -rf "/tmp/route_transfer"/*
+    # Only remove if paths are non-empty and exist
+    if [ -n "$CONCAT_DIR" ] && [ -d "$CONCAT_DIR" ]; then
+        rm -rf "${CONCAT_DIR:?}"/*
+    fi
+
+    if [ -d "/tmp/route_transfer" ]; then
+        rm -rf "/tmp/route_transfer"/*
+    fi
 }
 
 cleanup_old_logs() {
@@ -129,6 +135,10 @@ cleanup_old_logs() {
 }
 
 trap_cleanup() {
+    # Extra safety - if called before variables initialized
+    if [ -z "$CONCAT_DIR" ]; then
+        exit 1
+    fi
     cleanup_temp_files
     exit 1
 }
@@ -749,12 +759,12 @@ sync_backup_to_network() {
     local location_id="$2"
 
     # Get location details with proper error handling
-    local location
     if [ ! -f "$NETWORK_CONFIG" ]; then
         print_error "Network configuration file not found"
         return 1
     fi
 
+    local location
     location=$(jq -r --arg id "$location_id" '.locations[] | select(.location_id == $id)' "$NETWORK_CONFIG")
     if [ -z "$location" ] || [ "$location" = "null" ]; then
         print_error "Network location ID '$location_id' not found in configuration"
