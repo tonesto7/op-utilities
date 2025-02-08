@@ -43,12 +43,19 @@ detect_issues() {
         fi
     fi
 
-    # Check SSH files status
-    if [ ! -f "/home/comma/.ssh/github" ]; then
-        issues_found=$((issues_found + 1))
-        ISSUE_FIXES[$issues_found]="repair_create_ssh"
-        ISSUE_DESCRIPTIONS[$issues_found]="SSH keys missing - setup required"
-        ISSUE_PRIORITIES[$issues_found]=1
+    # Check SSH files status - unified SSH check logic
+    if [ ! -f "/home/comma/.ssh/github" ] || [ ! -d "/persist/comma" ]; then
+        if [ -n "$latest_backup" ] && [ -d "${latest_backup}/ssh" ] && [ -f "${latest_backup}/ssh/backup.tar.gz" ]; then
+            issues_found=$((issues_found + 1))
+            ISSUE_FIXES[$issues_found]="restore_backup_component ssh"
+            ISSUE_DESCRIPTIONS[$issues_found]="SSH files missing - Restore from backup?"
+            ISSUE_PRIORITIES[$issues_found]=1
+        else
+            issues_found=$((issues_found + 1))
+            ISSUE_FIXES[$issues_found]="repair_create_ssh"
+            ISSUE_DESCRIPTIONS[$issues_found]="SSH files missing - New setup required"
+            ISSUE_PRIORITIES[$issues_found]=1
+        fi
     fi
 
     # Check persistent storage

@@ -81,7 +81,7 @@ display_main_menu() {
     echo "┌────────────────────────────────────────────────────"
     echo "│             CommaUtility Script v$SCRIPT_VERSION"
     echo "│             (Last Modified: $SCRIPT_MODIFIED)"
-    echo "└────────────────────────────────────────────────────"
+    echo "├────────────────────────────────────────────────────"
 
     display_os_info_short
     display_backup_status_short
@@ -97,7 +97,7 @@ display_main_menu() {
     for i in "${!ISSUE_PRIORITIES[@]}"; do
         if [ "${ISSUE_PRIORITIES[$i]}" -eq 1 ]; then
             if [ "$critical_found" = false ]; then
-                echo "│────────────────────────────────────────────────────"
+                echo "├────────────────────────────────────────────────────"
                 echo -e "│ ${RED}Critical Issues:${NC}"
                 critical_found=true
             fi
@@ -110,7 +110,7 @@ display_main_menu() {
     for i in "${!ISSUE_PRIORITIES[@]}"; do
         if [ "${ISSUE_PRIORITIES[$i]}" -eq 2 ]; then
             if [ "$warnings_found" = false ]; then
-                echo "│────────────────────────────────────────────────────"
+                echo "├────────────────────────────────────────────────────"
                 echo -e "│ ${YELLOW}Warnings:${NC}"
                 warnings_found=true
             fi
@@ -123,7 +123,7 @@ display_main_menu() {
     for i in "${!ISSUE_PRIORITIES[@]}"; do
         if [ "${ISSUE_PRIORITIES[$i]}" -eq 3 ]; then
             if [ "$recommendations_found" = false ]; then
-                echo "│────────────────────────────────────────────────────"
+                echo "├────────────────────────────────────────────────────"
                 echo -e "│ ${BLUE}Recommendations:${NC}"
                 recommendations_found=true
             fi
