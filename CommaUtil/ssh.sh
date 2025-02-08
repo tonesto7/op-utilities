@@ -3,7 +3,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly SSH_SCRIPT_VERSION="3.0.0"
+readonly SSH_SCRIPT_VERSION="3.0.1"
 readonly SSH_SCRIPT_MODIFIED="2025-02-08"
 
 # Array to store SSH status
@@ -51,11 +51,11 @@ test_ssh_connection() {
 # - 0: Success
 # - 1: Failure
 display_ssh_status_short() {
-    print_info "| SSH Status:"
+    print_info "│ SSH Status:"
     if [ -f "/home/comma/.ssh/github" ]; then
-        echo "| └ Key: Found"
+        echo "│ └─ Key: Found"
     else
-        echo -e "${RED}| └ Key: Not Found${NC}"
+        echo -e "${RED}| └─ Key: Not Found${NC}"
     fi
 }
 
@@ -65,7 +65,7 @@ display_ssh_status_short() {
 # - 1: Failure
 display_ssh_status() {
     echo "+----------------------------------------------+"
-    echo "|          SSH Status                          |"
+    echo "│                  SSH Status                  │"
     echo "+----------------------------------------------+"
 
     local expected_owner="comma"
@@ -81,7 +81,7 @@ display_ssh_status() {
         local fingerprint
         fingerprint=$(ssh-keygen -lf /home/comma/.ssh/github 2>/dev/null | awk '{print $2}')
         if [ -n "$fingerprint" ]; then
-            echo -e "|  └ Fingerprint: $fingerprint"
+            echo -e "│  └─ Fingerprint: $fingerprint"
         fi
     elif [ "$ssh_check_result" -eq 1 ]; then
         echo -e "${NC}|${RED} SSH key in ~/.ssh/: ❌ (permissions/ownership mismatch)${NC}"
@@ -101,7 +101,7 @@ display_ssh_status() {
 
         local backup_timestamp
         backup_timestamp=$(jq -r '.timestamp' "${latest_backup}/${BACKUP_METADATA_FILE}")
-        echo -e "|  └ Last Backup: $backup_timestamp"
+        echo -e "│  ├─ Last Backup: $backup_timestamp"
 
         # Calculate backup age
         local backup_age
@@ -110,15 +110,15 @@ display_ssh_status() {
         backup_days=$((backup_age / 86400))
 
         if [ "$backup_days" -gt 30 ]; then
-            echo -e "${NC}|${YELLOW}  └ Warning: Backup is $backup_days days old${NC}"
+            echo -e "${NC}|${YELLOW}  └─ Warning: Backup is $backup_days days old${NC}"
         fi
 
         if [ -f "/home/comma/.ssh/github" ]; then
-            # Check if backup contains SSH files
-            if jq -e '.directories[] | select(.type=="ssh")' "${latest_backup}/${BACKUP_METADATA_FILE}" >/dev/null; then
-                echo -e "|  └ SSH files included in backup"
+            # Check if backup metadata includes SSH files (files count > 0)
+            if jq -e '.directories[] | select(.type=="ssh") | select(.files | tonumber > 0)' "${latest_backup}/${BACKUP_METADATA_FILE}" >/dev/null; then
+                echo -e "│  └─ SSH files included in backup"
             else
-                echo -e "${NC}|${YELLOW}  └ Warning: SSH files not included in backup${NC}"
+                echo -e "${NC}|${YELLOW}  └─ Warning: SSH files not included in backup${NC}"
             fi
         fi
     else
@@ -479,7 +479,7 @@ import_ssh_keys() {
 import_ssh_menu() {
     clear
     echo "+----------------------------------------------+"
-    echo "|           SSH Transfer Tool Info              |"
+    echo "│           SSH Transfer Tool Info             │"
     echo "+----------------------------------------------+"
     echo "This tool allows you to transfer SSH keys from your computer"
     echo "to your comma device automatically."
@@ -507,15 +507,15 @@ ssh_menu() {
         clear
         display_ssh_status
         echo "+----------------------------------------------+"
-        echo "|               SSH Key Manager                |"
+        echo "│               SSH Key Manager                │"
         echo "+----------------------------------------------+"
-        echo "| 1. Import SSH Keys from Host"
-        echo "| 2. Reset SSH Setup"
-        echo "| 3. View SSH Public Key"
-        echo "| 4. Copy SSH Config to Persistent Storage"
-        echo "| 5. Change Github SSH Port to 443"
-        echo "| 6. Test SSH Connection"
-        echo "| Q. Back to Main Menu"
+        echo "│ 1. Import SSH Keys from Host"
+        echo "│ 2. Reset SSH Setup"
+        echo "│ 3. View SSH Public Key"
+        echo "│ 4. Copy SSH Config to Persistent Storage"
+        echo "│ 5. Change Github SSH Port to 443"
+        echo "│ 6. Test SSH Connection"
+        echo "│ Q. Back to Main Menu"
         echo "+----------------------------------------------+"
         read -p "Enter your choice: " choice
         case $choice in

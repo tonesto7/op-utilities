@@ -3,7 +3,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly GIT_SCRIPT_VERSION="3.0.0"
+readonly GIT_SCRIPT_VERSION="3.0.1"
 readonly GIT_SCRIPT_MODIFIED="2025-02-08"
 
 ###############################################################################
@@ -11,7 +11,7 @@ readonly GIT_SCRIPT_MODIFIED="2025-02-08"
 ###############################################################################
 
 display_git_status_short() {
-    print_info "| Openpilot Repository:"
+    print_info "│ Openpilot Repository:"
     if [ -d "/data/openpilot" ]; then
         (
             cd "/data/openpilot" || return
@@ -19,17 +19,17 @@ display_git_status_short() {
             local branch_name
             repo_name=$(git config --get remote.origin.url | awk -F'/' '{print $NF}' | sed 's/.git//')
             branch_name=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-            echo "| ├ Repository: $repo_name"
-            echo "| └ Branch: $branch_name"
+            echo "│ ├─ Repository: $repo_name"
+            echo "│ └─ Branch: $branch_name"
         )
     else
-        echo -e "${YELLOW}| └ Repository: Missing${NC}"
+        echo -e "${YELLOW}| └─ Repository: Missing${NC}"
     fi
 }
 
 display_git_status() {
     if [ -d "/data/openpilot" ]; then
-        # echo "| Gathering repository details, please wait..."
+        # echo "│ Gathering repository details, please wait..."
 
         (
             cd "/data/openpilot" || exit 1
@@ -63,14 +63,14 @@ display_git_status() {
 
             # clear
             # echo "+----------------------------------------------+"
-            echo "| Openpilot directory: ✅"
-            echo "| ├─ Branch: $branch_name"
-            echo "| ├─ Repo: $repo_url"
-            echo -e "| ├─ Status: $repo_status"
-            echo -e "| └─ Submodules: $submodule_status"
+            echo "│ Openpilot directory: ✅"
+            echo "│ ├─ Branch: $branch_name"
+            echo "│ ├─ Repo: $repo_url"
+            echo -e "│ ├─ Status: $repo_status"
+            echo -e "│ └─ Submodules: $submodule_status"
         )
     else
-        echo "| Openpilot directory: ❌"
+        echo "│ Openpilot directory: ❌"
     fi
 }
 
@@ -118,7 +118,7 @@ git_operation_with_timeout() {
 list_git_branches() {
     clear
     echo "+----------------------------------------------+"
-    echo "|        Available Branches                    |"
+    echo "│        Available Branches                    │"
     echo "+----------------------------------------------+"
     if [ -d "/data/openpilot" ]; then
         (

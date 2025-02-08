@@ -3,7 +3,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly TRANSFERS_SCRIPT_VERSION="3.0.0"
+readonly TRANSFERS_SCRIPT_VERSION="3.0.1"
 readonly TRANSFERS_SCRIPT_MODIFIED="2025-02-08"
 
 ###############################################################################
@@ -258,7 +258,7 @@ manage_auto_sync_jobs() {
     while true; do
         clear
         echo "+------------------------------------------------+"
-        echo "|              Manage Route Sync Job             |"
+        echo "│              Manage Route Sync Job             │"
         echo "+------------------------------------------------+"
         # Grab the job block (if it exists)
         local job_block network_id network_label
@@ -270,18 +270,18 @@ manage_auto_sync_jobs() {
                 network_label=$(jq -r --arg id "$network_id" '(.smb[] + .ssh[]) | select(.location_id == $id) | .label' "$NETWORK_CONFIG")
             fi
             [ -z "$network_label" ] && network_label="Unknown"
-            echo -e "| Current Route Sync: ${GREEN}Route Sync ($network_label)${NC}"
+            echo -e "│ Current Route Sync: ${GREEN}Route Sync ($network_label)${NC}"
         else
-            echo -e "| Current Route Sync: ${RED}None configured${NC}"
+            echo -e "│ Current Route Sync: ${RED}None configured${NC}"
         fi
-        echo "|"
-        echo "| Available Options:"
+        echo "│"
+        echo "│ Available Options:"
         if [ -z "$job_block" ]; then
-            echo "| 1. Add Route Sync Job"
+            echo "│ 1. Add Route Sync Job"
         else
-            echo "| 1. Remove Route Sync Job"
+            echo "│ 1. Remove Route Sync Job"
         fi
-        echo "| Q. Back"
+        echo "│ Q. Back"
         echo "+------------------------------------------------+"
         read -p "Enter your choice: " choice
         case $choice in
@@ -303,7 +303,7 @@ manage_auto_backup_jobs() {
     while true; do
         clear
         echo "+------------------------------------------------+"
-        echo "|                Manage Backup Job               |"
+        echo "│                Manage Backup Job               │"
         echo "+------------------------------------------------+"
         local job_block network_id network_label
         job_block=$(grep -A1 "^### Start CommaUtility Backup" "$LAUNCH_ENV")
@@ -313,18 +313,18 @@ manage_auto_backup_jobs() {
                 network_label=$(jq -r --arg id "$network_id" '(.smb[] + .ssh[]) | select(.location_id == $id) | .label' "$NETWORK_CONFIG")
             fi
             [ -z "$network_label" ] && network_label="Unknown"
-            echo -e "| Current Backup: ${GREEN}Backup ($network_label)${NC}"
+            echo -e "│ Current Backup: ${GREEN}Backup ($network_label)${NC}"
         else
-            echo -e "| Current Backup: ${RED}None configured${NC}"
+            echo -e "│ Current Backup: ${RED}None configured${NC}"
         fi
-        echo "|"
-        echo "| Available Options:"
+        echo "│"
+        echo "│ Available Options:"
         if [ -z "$job_block" ]; then
-            echo "| 1. Add Backup Job"
+            echo "│ 1. Add Backup Job"
         else
-            echo "| 1. Remove Backup Job"
+            echo "│ 1. Remove Backup Job"
         fi
-        echo "| Q. Back"
+        echo "│ Q. Back"
         echo "+------------------------------------------------+"
         read -p "Enter your choice: " choice
         case $choice in
@@ -346,7 +346,7 @@ manage_auto_sync_and_backup_jobs() {
     while true; do
         clear
         echo "+------------------------------------------------+"
-        echo "|    Manage Auto Sync & Backup Jobs              |"
+        echo "│    Manage Auto Sync & Backup Jobs              │"
         echo "+------------------------------------------------+"
 
         # Show Route Sync Status
@@ -356,12 +356,12 @@ manage_auto_sync_and_backup_jobs() {
         if [ -n "$route_loc" ]; then
             local label=$(echo "$route_loc" | jq -r .label)
             if [ -n "$route_job" ]; then
-                echo -e "| Route Sync: ${GREEN}Enabled${NC} ($label)"
+                echo -e "│ Route Sync: ${GREEN}Enabled${NC} ($label)"
             else
-                echo -e "| Route Sync: ${YELLOW}Location Configured${NC} ($label) but job disabled"
+                echo -e "│ Route Sync: ${YELLOW}Location Configured${NC} ($label) but job disabled"
             fi
         else
-            echo -e "| Route Sync: ${RED}No Location Configured${NC}"
+            echo -e "│ Route Sync: ${RED}No Location Configured${NC}"
         fi
 
         # Show Backup Status
@@ -371,37 +371,37 @@ manage_auto_sync_and_backup_jobs() {
         if [ -n "$backup_loc" ]; then
             local label=$(echo "$backup_loc" | jq -r .label)
             if [ -n "$backup_job" ]; then
-                echo -e "| Device Backup: ${GREEN}Enabled${NC} ($label)"
+                echo -e "│ Device Backup: ${GREEN}Enabled${NC} ($label)"
             else
-                echo -e "| Device Backup: ${YELLOW}Location Configured${NC} ($label) but job disabled"
+                echo -e "│ Device Backup: ${YELLOW}Location Configured${NC} ($label) but job disabled"
             fi
         else
-            echo -e "| Device Backup: ${RED}No Location Configured${NC}"
+            echo -e "│ Device Backup: ${RED}No Location Configured${NC}"
         fi
 
-        echo "|"
-        echo "| Available Options:"
+        echo "│"
+        echo "│ Available Options:"
         if [ -n "$route_loc" ]; then
             if [ -n "$route_job" ]; then
-                echo "| 1. Disable Route Sync Job"
+                echo "│ 1. Disable Route Sync Job"
             else
-                echo "| 1. Enable Route Sync Job"
+                echo "│ 1. Enable Route Sync Job"
             fi
         else
-            echo "| 1. Configure Route Sync Location"
+            echo "│ 1. Configure Route Sync Location"
         fi
 
         if [ -n "$backup_loc" ]; then
             if [ -n "$backup_job" ]; then
-                echo "| 2. Disable Device Backup Job"
+                echo "│ 2. Disable Device Backup Job"
             else
-                echo "| 2. Enable Device Backup Job"
+                echo "│ 2. Enable Device Backup Job"
             fi
         else
-            echo "| 2. Configure Device Backup Location"
+            echo "│ 2. Configure Device Backup Location"
         fi
 
-        echo "| Q. Back"
+        echo "│ Q. Back"
         echo "+------------------------------------------------+"
 
         read -p "Enter your choice: " choice
@@ -809,13 +809,13 @@ transfer_routes_menu() {
         while true; do
             clear
             echo "+----------------------------------------------------+"
-            echo "|             Transfer Route: $route_base            |"
+            echo "│             Transfer Route: $route_base            │"
             echo "+----------------------------------------------------+"
-            echo "| Available Options:"
-            echo "| 1. Transfer this route"
-            echo "| 2. View Transfer Logs (for $route_base)"
-            echo "| 3. Resume Interrupted Transfers (for $route_base)"
-            echo "| Q. Back"
+            echo "│ Available Options:"
+            echo "│ 1. Transfer this route"
+            echo "│ 2. View Transfer Logs (for $route_base)"
+            echo "│ 3. Resume Interrupted Transfers (for $route_base)"
+            echo "│ Q. Back"
             echo "+----------------------------------------------+"
             read -p "Make a selection: " choice
             case $choice in
@@ -835,7 +835,7 @@ transfer_routes_menu() {
             2)
                 clear
                 echo "+----------------------------------------------------+"
-                echo "|           Transfer Logs for $route_base            |"
+                echo "│           Transfer Logs for $route_base            │"
                 echo "+----------------------------------------------------+"
                 if [ -f "$CONFIG_DIR/transfer_logs.json" ]; then
                     jq -r --arg route "$route_base" '.[] | select(.route == $route) | "\(.timestamp) | \(.route) | \(.status) | \(.destination) | \(.size) | \(.duration)"' "$CONFIG_DIR/transfer_logs.json" | column -t -s'|'
@@ -847,7 +847,7 @@ transfer_routes_menu() {
             3)
                 clear
                 echo "+----------------------------------------------------+"
-                echo "|     Interrupted Transfers for $route_base          |"
+                echo "│     Interrupted Transfers for $route_base          │"
                 echo "+----------------------------------------------------+"
                 list_interrupted_transfers "$route_base"
                 echo "-----------------------------------------------------"
@@ -876,16 +876,16 @@ transfer_routes_menu() {
         while true; do
             clear
             echo "+----------------------------------------------------+"
-            echo "|                  Transfer Routes                   |"
+            echo "│                  Transfer Routes                   │"
             echo "+----------------------------------------------------+"
-            echo "| Available Options:"
-            echo "| 1. Transfer single route"
-            echo "| 2. Transfer multiple routes"
-            echo "| 3. Transfer all routes"
-            echo "| 4. Manage network locations"
-            echo "| 5. View Transfer Logs (all routes)"
-            echo "| 6. Resume Interrupted Transfers (all routes)"
-            echo "| Q. Back"
+            echo "│ Available Options:"
+            echo "│ 1. Transfer single route"
+            echo "│ 2. Transfer multiple routes"
+            echo "│ 3. Transfer all routes"
+            echo "│ 4. Manage network locations"
+            echo "│ 5. View Transfer Logs (all routes)"
+            echo "│ 6. Resume Interrupted Transfers (all routes)"
+            echo "│ Q. Back"
             echo "+----------------------------------------------------+"
             read -p "Make a selection: " choice
             case $choice in
@@ -940,7 +940,7 @@ transfer_routes_menu() {
             5)
                 clear
                 echo "+----------------------------------------------------+"
-                echo "|                    Transfer Logs                   |"
+                echo "│                    Transfer Logs                   │"
                 echo "+----------------------------------------------------+"
                 if [ -f "$CONFIG_DIR/transfer_logs.json" ]; then
                     jq -r '.[] | "\(.timestamp) | \(.route) | \(.status) | \(.destination) | \(.size) | \(.duration)"' "$CONFIG_DIR/transfer_logs.json" | column -t -s'|'
@@ -952,7 +952,7 @@ transfer_routes_menu() {
             6)
                 clear
                 echo "+----------------------------------------------------+"
-                echo "|                Interrupted Transfers               |"
+                echo "│                Interrupted Transfers               │"
                 echo "+----------------------------------------------------+"
                 list_interrupted_transfers
                 echo "-----------------------------------------------------"
@@ -987,13 +987,13 @@ sync_routes_menu() {
         return
     fi
     echo "+--------------------------------------------+"
-    echo "|              Sync Routes Menu              |"
+    echo "│              Sync Routes Menu              │"
     echo "+--------------------------------------------+"
-    echo "|"
-    echo "| Available Options:"
-    echo "| 1. Sync all routes"
-    echo "| 2. Sync a selected route"
-    echo "| Q. Back"
+    echo "│"
+    echo "│ Available Options:"
+    echo "│ 1. Sync all routes"
+    echo "│ 2. Sync a selected route"
+    echo "│ Q. Back"
     echo "+---------------------------------------------"
     read -p "Enter your choice: " sync_choice
     case $sync_choice in
@@ -1486,7 +1486,7 @@ add_ssh_location() {
 test_all_connections() {
     clear
     echo "+----------------------------------------------+"
-    echo "|           Testing Network Locations          |"
+    echo "│           Testing Network Locations          │"
     echo "+----------------------------------------------+"
 
     # Test Route Sync Location
@@ -1622,7 +1622,7 @@ manage_network_locations_menu() {
     while true; do
         clear
         echo "+----------------------------------------------+"
-        echo "|         Network Location Management          |"
+        echo "│         Network Location Management          │"
         echo "+----------------------------------------------+"
 
         # Show Route Sync Location
@@ -1638,18 +1638,18 @@ manage_network_locations_menu() {
                 status=$(test_ssh_connection "$route_loc")
             fi
             if [ "$status" = "Valid" ]; then
-                echo -e "| Route Sync Location:"
-                echo -e "|  - Label: ${GREEN}$label${NC}"
-                echo -e "|  - Protocol: ${GREEN}$protocol${NC}"
-                echo -e "|  - Status: ${GREEN}Connected${NC}"
+                echo -e "│ Route Sync Location:"
+                echo -e "│  - Label: ${GREEN}$label${NC}"
+                echo -e "│  - Protocol: ${GREEN}$protocol${NC}"
+                echo -e "│  - Status: ${GREEN}Connected${NC}"
             else
-                echo -e "| Route Sync Location:"
-                echo -e "|  - Label: ${RED}$label${NC}"
-                echo -e "|  - Protocol: ${RED}$protocol${NC}"
-                echo -e "|  - Status: ${RED}Disconnected${NC}"
+                echo -e "│ Route Sync Location:"
+                echo -e "│  - Label: ${RED}$label${NC}"
+                echo -e "│  - Protocol: ${RED}$protocol${NC}"
+                echo -e "│  - Status: ${RED}Disconnected${NC}"
             fi
         else
-            echo -e "| Route Sync Location: ${YELLOW}Not Configured${NC}"
+            echo -e "│ Route Sync Location: ${YELLOW}Not Configured${NC}"
         fi
 
         # Show Device Backup Location
@@ -1665,28 +1665,28 @@ manage_network_locations_menu() {
                 status=$(test_ssh_connection "$backup_loc")
             fi
             if [ "$status" = "Valid" ]; then
-                echo -e "| Device Backup Location:"
-                echo -e "|  - Label: ${GREEN}$label${NC}"
-                echo -e "|  - Protocol: ${GREEN}$protocol${NC}"
-                echo -e "|  - Status: ${GREEN}Connected${NC}"
+                echo -e "│ Device Backup Location:"
+                echo -e "│  - Label: ${GREEN}$label${NC}"
+                echo -e "│  - Protocol: ${GREEN}$protocol${NC}"
+                echo -e "│  - Status: ${GREEN}Connected${NC}"
             else
-                echo -e "| Device Backup Location:"
-                echo -e "|  - Label: ${RED}$label${NC}"
-                echo -e "|  - Protocol: ${RED}$protocol${NC}"
-                echo -e "|  - Status: ${RED}Disconnected${NC}"
+                echo -e "│ Device Backup Location:"
+                echo -e "│  - Label: ${RED}$label${NC}"
+                echo -e "│  - Protocol: ${RED}$protocol${NC}"
+                echo -e "│  - Status: ${RED}Disconnected${NC}"
             fi
         else
-            echo -e "| Device Backup Location: ${YELLOW}Not Configured${NC}"
+            echo -e "│ Device Backup Location: ${YELLOW}Not Configured${NC}"
         fi
 
-        echo "|"
-        echo "| Available Options:"
-        echo "| 1. Configure Route Sync Location"
-        echo "| 2. Configure Device Backup Location"
-        echo "| 3. Remove Route Sync Location"
-        echo "| 4. Remove Device Backup Location"
-        echo "| 5. Test Connections"
-        echo "| Q. Back"
+        echo "│"
+        echo "│ Available Options:"
+        echo "│ 1. Configure Route Sync Location"
+        echo "│ 2. Configure Device Backup Location"
+        echo "│ 3. Remove Route Sync Location"
+        echo "│ 4. Remove Device Backup Location"
+        echo "│ 5. Test Connections"
+        echo "│ Q. Back"
         echo "+----------------------------------------------+"
 
         read -p "Make a selection: " choice
@@ -1714,12 +1714,12 @@ configure_network_location() {
 
     clear
     echo "+----------------------------------------------+"
-    echo "|       Configure $type_label Location         |"
+    echo "│       Configure $type_label Location         │"
     echo "+----------------------------------------------+"
-    echo "| Select Protocol:"
-    echo "| 1. SMB Share"
-    echo "| 2. SSH Location"
-    echo "| Q. Cancel"
+    echo "│ Select Protocol:"
+    echo "│ 1. SMB Share"
+    echo "│ 2. SSH Location"
+    echo "│ Q. Cancel"
     echo "+----------------------------------------------+"
 
     read -p "Enter choice: " protocol_choice
@@ -1760,7 +1760,7 @@ select_network_location() {
     # Otherwise, show selection menu
     clear
     echo "+----------------------------------------------+"
-    echo "|         Select Network Location              |"
+    echo "│         Select Network Location              │"
     echo "+----------------------------------------------+"
 
     local route_loc backup_loc

@@ -3,7 +3,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly ROUTES_SCRIPT_VERSION="3.0.0"
+readonly ROUTES_SCRIPT_VERSION="3.0.1"
 readonly ROUTES_SCRIPT_MODIFIED="2025-02-08"
 
 # Routes Related Constants
@@ -242,7 +242,7 @@ concat_route_menu() {
     while true; do
         clear
         echo "+----------------------------------------------+"
-        echo "|            Concatenate Route Files           |"
+        echo "│            Concatenate Route Files           │"
         echo "+----------------------------------------------+"
         echo "Route: $route_base"
         echo ""
@@ -275,7 +275,7 @@ concat_route_menu() {
 
 display_routes_table() {
     echo "+-------------------------------------------------------"
-    echo "| Gathering Route Statistics..."
+    echo "│ Gathering Route Statistics..."
     local stats
     stats=$(display_route_stats)
     # Remove the "Gathering" message by clearing the previous line
@@ -296,15 +296,15 @@ display_routes_table() {
     # Check if no routes were found.
     if [ ${#routes[@]} -eq 0 ]; then
         echo "+------------------------------------------------------+"
-        echo "|                 No routes available                  |"
+        echo "│                 No routes available                  │"
         echo "+------------------------------------------------------+"
         return 0
     fi
 
-    echo "| Available Routes (newest first):"
+    echo "│ Available Routes (newest first):"
     echo "+-------------------------------------------------------"
     # Table header
-    printf "|%-4s | %-17s | %-8s | %-6s | %-6s |\n" "#" "Date & Time" "Duration" "Segs" "Size"
+    printf "│%-4s | %-17s | %-8s | %-6s | %-6s |\n" "#" "Date & Time" "Duration" "Segs" "Size"
     echo "+-------------------------------------------------------"
 
     local count=1
@@ -317,7 +317,7 @@ display_routes_table() {
         duration_short=$(echo "$duration" | sed 's/^00://')
         size=$(du -sh "$ROUTES_DIR"/${route}--* 2>/dev/null | head -1 | awk '{print $1}')
         local line
-        line=$(printf "|%3d. | %-17s | %8s | %6d | %6s |" "$count" "$friendly_date" "$duration_short" "$segments" "$size")
+        line=$(printf "│%3d. | %-17s | %8s | %6d | %6s │" "$count" "$friendly_date" "$duration_short" "$segments" "$size")
         if [ "$segments" -gt 20 ]; then
             echo -e "${GREEN}${line}${NC}"
         elif [ "$segments" -gt 10 ]; then
@@ -331,11 +331,11 @@ display_routes_table() {
     done
 
     echo "+-------------------------------------------------------"
-    echo "| Legend:"
-    echo -e "| ${GREEN}■${NC} Long trips (>20 segments)"
-    echo -e "| ${BLUE}■${NC} Medium trips (11-20 segments)"
-    echo -e "| ${YELLOW}■${NC} Single segment trips"
-    echo -e "| ${NC}■${NC} Short trips (2-10 segments)"
+    echo "│ Legend:"
+    echo -e "│ ${GREEN}■${NC} Long trips (>20 segments)"
+    echo -e "│ ${BLUE}■${NC} Medium trips (11-20 segments)"
+    echo -e "│ ${YELLOW}■${NC} Single segment trips"
+    echo -e "│ ${NC}■${NC} Short trips (2-10 segments)"
     echo "+-------------------------------------------------------"
 }
 
@@ -345,15 +345,15 @@ view_routes_menu() {
         update_route_cache
         display_routes_table
 
-        echo "|"
-        echo "| Available Options:"
-        echo "| 1. View route details"
-        echo "| 2. Remove a single route"
-        echo "| 3. Remove ALL routes"
-        echo "| 4. Sync a single route"
-        echo "| 5. Sync ALL routes"
-        echo "| 6. Manage Network Locations"
-        echo "| Q. Back to Main Menu"
+        echo "│"
+        echo "│ Available Options:"
+        echo "│ 1. View route details"
+        echo "│ 2. Remove a single route"
+        echo "│ 3. Remove ALL routes"
+        echo "│ 4. Sync a single route"
+        echo "│ 5. Sync ALL routes"
+        echo "│ 6. Manage Network Locations"
+        echo "│ Q. Back to Main Menu"
         echo "+-------------------------------------------------------"
 
         read -p "Select an option: " choice
@@ -512,7 +512,7 @@ select_single_route() {
     fi
     {
         echo "+----------------------------------------------------+"
-        echo "|             Select a Route to Transfer             |"
+        echo "│             Select a Route to Transfer             │"
         echo "+----------------------------------------------------+"
         for ((i = 0; i < total_routes; i++)); do
             local route timestamp duration segments size
@@ -617,7 +617,7 @@ view_route_details() {
     while true; do
         clear
         echo "+----------------------------------------------+"
-        echo "|                Route Details                 |"
+        echo "│                Route Details                 │"
         echo "+----------------------------------------------+"
         echo "Route ID: $route_base"
         echo "Date/Time: $timestamp"
@@ -660,7 +660,7 @@ display_route_stats() {
     total_segments=$(jq '[.[].segments | tonumber] | add' "$cache_file")
     total_size_bytes=$(find "$ROUTES_DIR" -maxdepth 1 -name "*--*" -type d -exec du -b {} + | awk '{sum += $1} END {print sum}')
     total_size=$(numfmt --to=iec-i --suffix=B "$total_size_bytes")
-    echo "| Routes: $total_routes | Segments: $total_segments"
-    echo "| Total Size: $total_size"
+    echo "│ Routes: $total_routes | Segments: $total_segments"
+    echo "│ Total Size: $total_size"
     echo "+------------------------------------------------------+"
 }

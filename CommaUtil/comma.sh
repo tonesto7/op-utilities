@@ -3,7 +3,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly COMMA_SCRIPT_VERSION="3.0.0"
+readonly COMMA_SCRIPT_VERSION="3.0.1"
 readonly COMMA_SCRIPT_MODIFIED="2025-02-08"
 
 ###############################################################################
@@ -146,7 +146,7 @@ toggle_boot_logo() {
 display_logs() {
     clear
     echo "+---------------------------------+"
-    echo "|            Log Files            |"
+    echo "│            Log Files            │"
     echo "+---------------------------------+"
     local log_files
     log_files=(/data/log/*)

@@ -3,7 +3,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly STORAGE_SCRIPT_VERSION="3.0.0"
+readonly STORAGE_SCRIPT_VERSION="3.0.1"
 readonly STORAGE_SCRIPT_MODIFIED="2025-02-08"
 
 ###############################################################################
@@ -36,13 +36,13 @@ mount_rw() {
 ###############################################################################
 
 display_disk_space_status_short() {
-    print_info "| Disk Space:"
+    print_info "│ Disk Space:"
     local data_usage_root
     local data_usage_data
     data_usage_root=$(df -h / | awk 'NR==2 {printf "Used: %s/%s (%s)", $3, $2, $5}')
     data_usage_data=$(df -h /data | awk 'NR==2 {printf "Used: %s/%s (%s)", $3, $2, $5}')
-    echo "| ├ (/):     $data_usage_root"
-    echo "| └ (/data): $data_usage_data"
+    echo "│ ├─ (/):     $data_usage_root"
+    echo "│ └─ (/data): $data_usage_data"
 }
 
 ###############################################################################

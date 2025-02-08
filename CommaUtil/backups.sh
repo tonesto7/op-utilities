@@ -3,7 +3,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly BACKUPS_SCRIPT_VERSION="3.0.0"
+readonly BACKUPS_SCRIPT_VERSION="3.0.1"
 readonly BACKUPS_SCRIPT_MODIFIED="2025-02-08"
 
 # Device Backup Related Constants
@@ -46,7 +46,7 @@ has_legacy_backup() {
 ###############################################################################
 
 display_backup_status_short() {
-    print_info "| Backup Status:"
+    print_info "│ Backup Status:"
     # Check network location configuration
     local backup_loc backup_job
     backup_loc=$(get_backup_location)
@@ -63,20 +63,23 @@ display_backup_status_short() {
             status=$(test_ssh_connection "$backup_loc")
         fi
 
+        # Trim whitespace/newlines from status
+        status=$(echo "$status" | xargs)
+
         if [ "$status" = "Valid" ]; then
-            echo -e "| ├ Network: ${GREEN}$label (Connected)${NC}"
+            echo -e "│ ├─ Network: ${GREEN}$label (Connected)${NC}"
         else
-            echo -e "| ├ Network: ${RED}$label (Disconnected)${NC}"
+            echo -e "│ ├─ Network: ${RED}$label (Disconnected)${NC}"
         fi
 
         if [ -n "$backup_job" ]; then
-            echo -e "| ├ Auto-Backup: ${GREEN}Enabled${NC}"
+            echo -e "│ ├─ Auto-Backup: ${GREEN}Enabled${NC}"
         else
-            echo -e "| ├ Auto-Backup: ${YELLOW}Disabled${NC}"
+            echo -e "│ ├─ Auto-Backup: ${YELLOW}Disabled${NC}"
         fi
     else
-        echo -e "| ├ Network: ${YELLOW}Not Configured${NC}"
-        echo -e "| ├ Auto-Backup: ${RED}Not Available${NC}"
+        echo -e "│ ├─ Network: ${YELLOW}Not Configured${NC}"
+        echo -e "│ ├─ Auto-Backup: ${RED}Not Available${NC}"
     fi
 
     ## Find most recent backup with a small delay to allow for file system updates
@@ -102,17 +105,17 @@ display_backup_status_short() {
         params_files=$(jq -r '.directories[] | select(.type=="params") | .files' "${latest_backup}/${BACKUP_METADATA_FILE}")
         commautil_files=$(jq -r '.directories[] | select(.type=="commautil") | .files' "${latest_backup}/${BACKUP_METADATA_FILE}")
 
-        echo "| ├ Latest: $(date -d "$backup_timestamp" "+%Y-%m-%d %H:%M")"
+        echo "│ ├─ Latest: $(date -d "$backup_timestamp" "+%Y-%m-%d %H:%M")"
         if [ "$backup_age_days" -gt 30 ]; then
-            echo -e "| ├ Age: ${YELLOW}${backup_age_days} days old${NC}"
+            echo -e "│ ├─ Age: ${YELLOW}${backup_age_days} days old${NC}"
         else
-            echo -e "| ├ Age: ${GREEN}${backup_age_days} days old${NC}"
+            echo -e "│ ├─ Age: ${GREEN}${backup_age_days} days old${NC}"
         fi
-        echo "| ├ Latest Size: $backup_size"
-        echo "| ├ Total Size: $total_size (Backups: $max_label)"
-        echo "| └ Contents: SSH($ssh_files), Params($params_files), Config($commautil_files) files"
+        echo "│ ├─ Latest Size: $backup_size"
+        echo "│ ├─ Total Size: $total_size (Backups: $max_label)"
+        echo "│ └─ Contents: SSH($ssh_files), Params($params_files), Config($commautil_files) files"
     else
-        echo -e "| └ ${RED}No backups found${NC}"
+        echo -e "│ └─ ${RED}No backups found${NC}"
     fi
 }
 
@@ -267,12 +270,12 @@ cleanup_old_backups() {
 restore_backup() {
     clear
     echo "+----------------------------------------------+"
-    echo "|            Restore from Backup               |"
+    echo "│            Restore from Backup               │"
     echo "+----------------------------------------------+"
-    echo "| Restore Source:"
-    echo "| 1. Local device backup"
-    echo "| 2. Network location"
-    echo "| Q. Cancel"
+    echo "│ Restore Source:"
+    echo "│ 1. Local device backup"
+    echo "│ 2. Network location"
+    echo "│ Q. Cancel"
     echo "+----------------------------------------------+"
 
     read -p "Select restore source: " source_choice
@@ -544,29 +547,29 @@ backup_menu() {
     while true; do
         clear
         echo "+----------------------------------------------+"
-        echo "|            Device Backup Manager             |"
+        echo "│            Device Backup Manager             │"
         echo "+----------------------------------------------+"
         display_backup_status_short
-        echo "| "
-        echo "| Available Options:"
-        echo "| 1.  Create New Backup"
-        echo "| 2.  Restore from Backup"
-        echo "| 3.  View Available Backups"
-        echo "| 4.  Remove Specific Backup"
-        echo "| 5.  Remove All Backups"
-        echo "| 6.  Configure Network Location"
+        echo "│ "
+        echo "│ Available Options:"
+        echo "│ 1.  Create New Backup"
+        echo "│ 2.  Restore from Backup"
+        echo "│ 3.  View Available Backups"
+        echo "│ 4.  Remove Specific Backup"
+        echo "│ 5.  Remove All Backups"
+        echo "│ 6.  Configure Network Location"
         if [ -n "$backup_loc" ]; then
-            echo "| 7.  Configure Auto-Backup"
-            echo "| 8.  Test Network Connection"
-            echo "| 9.  Network Location Settings"
-            echo "| 10. Sync Latest Backup to Network"
+            echo "│ 7.  Configure Auto-Backup"
+            echo "│ 8.  Test Network Connection"
+            echo "│ 9.  Network Location Settings"
+            echo "│ 10. Sync Latest Backup to Network"
         fi
 
         if [ "$has_legacy_backup" = "true" ]; then
-            echo "| M. Migrate Legacy Backup"
+            echo "│ M. Migrate Legacy Backup"
         fi
 
-        echo "| Q|B. Back to Main Menu"
+        echo "│ Q|B. Back to Main Menu"
         echo "+----------------------------------------------+"
 
         read -p "Enter your choice: " choice
@@ -577,13 +580,13 @@ backup_menu() {
         4) remove_backup ;;
         5)
             echo "+----------------------------------------------+"
-            echo "|               Remove All Backups             |"
+            echo "│               Remove All Backups             │"
             echo "+----------------------------------------------+"
-            echo "| Remove Backups from:"
-            echo "| 1. Local device only"
-            echo "| 2. Network location only"
-            echo "| 3. Both local and network"
-            echo "| Q. Cancel"
+            echo "│ Remove Backups from:"
+            echo "│ 1. Local device only"
+            echo "│ 2. Network location only"
+            echo "│ 3. Both local and network"
+            echo "│ Q. Cancel"
             echo "+----------------------------------------------+"
             read -p "Select option: " remove_choice
             case $remove_choice in
@@ -637,7 +640,7 @@ backup_menu() {
 view_backup_details() {
     clear
     echo "+----------------------------------------------------+"
-    echo "|               Available Backups                     |"
+    echo "│               Available Backups                     │"
     echo "+----------------------------------------------------+"
 
     # List available backups
@@ -788,7 +791,7 @@ remove_all_backups() {
 select_backup_for_removal() {
     clear
     echo "+----------------------------------------------------+"
-    echo "|               Select Backup to Remove               |"
+    echo "│               Select Backup to Remove               │"
     echo "+----------------------------------------------------+"
 
     # List available backups

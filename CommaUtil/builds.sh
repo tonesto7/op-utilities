@@ -3,7 +3,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly BUILDS_SCRIPT_VERSION="3.0.0"
+readonly BUILDS_SCRIPT_VERSION="3.0.1"
 readonly BUILDS_SCRIPT_MODIFIED="2025-02-08"
 
 # Variables from build_bluepilot script
@@ -487,7 +487,7 @@ repo_build_and_management_menu() {
     while true; do
         clear
         echo "+----------------------------------------------+"
-        echo "|        Repository Build & Management         |"
+        echo "│        Repository Build & Management         │"
         echo "+----------------------------------------------+"
         display_git_status
         echo "+----------------------------------------------+"

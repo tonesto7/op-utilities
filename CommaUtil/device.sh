@@ -3,7 +3,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly DEVICE_SCRIPT_VERSION="3.0.0"
+readonly DEVICE_SCRIPT_VERSION="3.0.1"
 readonly DEVICE_SCRIPT_MODIFIED="2025-02-08"
 
 ###############################################################################
@@ -15,11 +15,11 @@ display_os_info_short() {
     local build_time
     agnos_version=$(cat /VERSION 2>/dev/null)
     build_time=$(awk 'NR==2' /BUILD 2>/dev/null)
-    print_info "| System Information:"
-    print_info "| ├ AGNOS: $agnos_version ($build_time)"
-    print_info "| ├ Hardware Serial: $(get_device_id)"
-    print_info "| ├ Panda Dongle ID: $(get_dongle_id)"
-    print_info "| └ WiFi MAC Address: $(get_wifi_mac)"
+    print_info "│ System Information:"
+    print_info "│ ├─ AGNOS: $agnos_version ($build_time)"
+    print_info "│ ├─ Hardware Serial: $(get_device_id)"
+    print_info "│ ├─ Panda Dongle ID: $(get_dongle_id)"
+    print_info "│ └─ WiFi MAC Address: $(get_wifi_mac)"
 }
 
 display_general_status() {
@@ -28,12 +28,12 @@ display_general_status() {
     agnos_version=$(cat /VERSION 2>/dev/null)
     build_time=$(awk 'NR==2' /BUILD 2>/dev/null)
     echo "+----------------------------------------------+"
-    echo "|                 Other Items                  |"
+    echo "│                 Other Items                  │"
     echo "+----------------------------------------------+"
-    echo "| AGNOS: v$agnos_version ($build_time)"
-    echo "| Hardware Serial: $(get_device_id)"
-    echo "| WiFi MAC Address: $(get_wifi_mac)"
-    echo "| Panda Dongle ID: $(get_dongle_id)"
+    echo "│ AGNOS: v$agnos_version ($build_time)"
+    echo "│ Hardware Serial: $(get_device_id)"
+    echo "│ WiFi MAC Address: $(get_wifi_mac)"
+    echo "│ Panda Dongle ID: $(get_dongle_id)"
     echo "+----------------------------------------------+"
 }
 
@@ -70,7 +70,7 @@ shutdown_device() {
 manage_wifi_networks() {
     clear
     echo "+----------------------------------------------+"
-    echo "|           WiFi Network Management            |"
+    echo "│           WiFi Network Management            │"
     echo "+----------------------------------------------+"
 
     # Check if nmcli is available
@@ -163,7 +163,7 @@ restart_cellular_radio() {
 manage_bluetooth() {
     clear
     echo "+----------------------------------------------+"
-    echo "|             Bluetooth Management             |"
+    echo "│             Bluetooth Management             │"
     echo "+----------------------------------------------+"
 
     # Check if bluetoothctl is available
@@ -215,7 +215,7 @@ device_controls_menu() {
     while true; do
         clear
         echo "+----------------------------------------------+"
-        echo "|               Device Controls                |"
+        echo "│               Device Controls                │"
         echo "+----------------------------------------------+"
         echo "1. WiFi Network Management"
         echo "2. Restart Cellular Radio"
@@ -306,31 +306,31 @@ system_statistics_menu() {
     while true; do
         clear
         echo "+----------------------------------------------+"
-        echo "|               System Statistics              |"
+        echo "│               System Statistics              │"
         echo "+----------------------------------------------+"
 
         echo "CPU Usage:"
-        echo "├ $(get_cpu_stats)"
-        echo "├ Top Processes by CPU:"
+        echo "├─ $(get_cpu_stats)"
+        echo "├─ Top Processes by CPU:"
         ps -eo cmd,%cpu --sort=-%cpu | head -4 | tail -3 |
             awk '{printf "│  %-40s %5.1f%%\n", substr($1,1,40), $NF}'
         echo ""
 
         echo "Memory Usage:"
-        echo "├ $(get_memory_stats)"
-        echo "├ Memory Details:"
+        echo "├─ $(get_memory_stats)"
+        echo "├─ Memory Details:"
         free -h | awk 'NR==2{printf "│  %-8s %8s %8s %8s %8s\n", "", "total", "used", "free", "cache"}'
         free -h | awk 'NR==2{printf "│  %-8s %8s %8s %8s %8s\n", "Mem:", $2, $3, $4, $6}'
         free -h | awk 'NR==3{printf "│  %-8s %8s %8s %8s\n", "Swap:", $2, $3, $4}'
         echo ""
 
         echo "Cellular Connection:"
-        echo "├ $(get_cellular_stats)"
+        echo "├─ $(get_cellular_stats)"
         if command -v mmcli >/dev/null 2>&1; then
             local modem_index
             modem_index=$(mmcli -L | grep -o '[0-9]*' | head -1)
             if [ -n "$modem_index" ]; then
-                echo "├ Additional Details:"
+                echo "├─ Additional Details:"
                 mmcli -m "$modem_index" | grep -E "operator name|signal quality|state|access tech|power state|packet service state" |
                     sed 's/^/│  /' | sed 's/|//'
             fi
@@ -338,7 +338,7 @@ system_statistics_menu() {
         echo ""
 
         echo "Disk Usage:"
-        echo "├ Filesystem Details:"
+        echo "├─ Filesystem Details:"
         df -h | grep -E '^/dev|Filesystem' |
             awk '{printf "│  %-15s %8s %8s %8s %8s\n", substr($1,length($1)>15?length($1)-15:0), $2, $3, $4, $5}'
         echo ""
