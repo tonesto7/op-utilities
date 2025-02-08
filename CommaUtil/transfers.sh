@@ -39,11 +39,23 @@ check_prerequisites() {
 }
 
 verify_network_connectivity() {
-    local type="$1" location="$2"
+    local type="$1"
+    local location="$2"
+
     if [ "$type" = "smb" ]; then
-        [ "$(test_smb_connection "$location")" = "Valid" ] || return 1
+        local status
+        status=$(test_smb_connection "$location")
+        [ "$status" = "Valid" ] || {
+            print_error "SMB connection failed: $status"
+            return 1
+        }
     else
-        [ "$(test_ssh_connection "$location")" = "Valid" ] || return 1
+        local status
+        status=$(test_ssh_connection "$location")
+        [ "$status" = "Valid" ] || {
+            print_error "SSH connection failed: $status"
+            return 1
+        }
     fi
     return 0
 }
@@ -736,13 +748,40 @@ sync_backup_to_network() {
     local backup_dir="$1"
     local location_id="$2"
 
-    # Get location details
+    # Get location details with proper error handling
     local location
-    location=$(get_network_location_by_id "$location_id") || return 1
+    if [ ! -f "$NETWORK_CONFIG" ]; then
+        print_error "Network configuration file not found"
+        return 1
+    fi
+
+    location=$(jq -r --arg id "$location_id" '.locations[] | select(.location_id == $id)' "$NETWORK_CONFIG")
+    if [ -z "$location" ] || [ "$location" = "null" ]; then
+        print_error "Network location ID '$location_id' not found in configuration"
+        return 1
+    fi
+
+    # Verify required fields exist
+    local server share path username
+    server=$(echo "$location" | jq -r '.server')
+    share=$(echo "$location" | jq -r '.share')
+    path=$(echo "$location" | jq -r '.path')
+    username=$(echo "$location" | jq -r '.username')
+
+    if [ -z "$server" ] || [ "$server" = "null" ] ||
+        [ -z "$share" ] || [ "$share" = "null" ] ||
+        [ -z "$username" ] || [ "$username" = "null" ]; then
+        print_error "Invalid network location configuration - missing required fields"
+        return 1
+    fi
 
     # Determine protocol
     local protocol
-    protocol=$(echo "$location" | jq -r 'if has("share") then "smb" else "ssh" end')
+    protocol=$(echo "$location" | jq -r '.protocol')
+    if [ "$protocol" != "smb" ] && [ "$protocol" != "ssh" ]; then
+        print_error "Invalid protocol specified in network configuration"
+        return 1
+    fi
 
     # Verify network connectivity
     if ! verify_network_connectivity "$protocol" "$location"; then
@@ -751,7 +790,13 @@ sync_backup_to_network() {
     fi
 
     # Transfer the backup
-    transfer_backup "$backup_dir" "$location_id"
+    if ! transfer_backup "$backup_dir" "$location_id"; then
+        print_error "Backup transfer failed"
+        return 1
+    fi
+
+    print_success "Backup transferred successfully"
+    return 0
 }
 
 ###############################################################################
@@ -1499,9 +1544,19 @@ test_smb_connection() {
     local share=$(echo "$location" | jq -r .share)
     local username=$(echo "$location" | jq -r .username)
     local cred_file=$(echo "$location" | jq -r .credential_file)
-    local password=$(decrypt_credentials "$cred_file")
-    local mount_point="/tmp/test_smb_mount"
-    mkdir -p "$mount_point"
+
+    if [ ! -f "$cred_file" ]; then
+        echo "Credential file not found"
+        return 1
+    fi
+
+    local password
+    password=$(decrypt_credentials "$cred_file")
+    if [ -z "$password" ]; then
+        echo "Failed to decrypt credentials"
+        return 1
+    fi
+
     local output
     output=$(smbclient "//${server}/${share}" -U "${username}%${password}" -c 'ls' 2>&1)
     if [ $? -eq 0 ]; then

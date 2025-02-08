@@ -17,6 +17,30 @@ readonly BACKUP_DIRS=(
     "/data/commautil"
 )
 
+get_backup_location() {
+    local backup_loc
+    if [ -f "$NETWORK_CONFIG" ]; then
+        backup_loc=$(jq -r '.locations[] | select(.type == "device_backup")' "$NETWORK_CONFIG")
+    fi
+    echo "$backup_loc"
+}
+
+get_backup_job() {
+    local backup_job
+    if [ -f "$LAUNCH_ENV" ]; then # Changed from LAUNCH_ENV_FILE to LAUNCH_ENV
+        backup_job=$(grep -A1 "^### Start CommaUtility Backup" "$LAUNCH_ENV")
+    fi
+    echo "$backup_job"
+}
+
+has_legacy_backup() {
+    if [ -d "/data/ssh_backup" ] && [ -f "/data/ssh_backup/metadata.txt" ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 ###############################################################################
 # Backup Status Functions
 ###############################################################################
@@ -25,31 +49,24 @@ display_backup_status_short() {
     print_info "| Backup Status:"
     # Check network location configuration
     local backup_loc backup_job
-    if [ -f "$NETWORK_CONFIG" ]; then
-        backup_loc=$(jq -r '.locations[] | select(.type == "device_backup")' "$NETWORK_CONFIG")
-    fi
-    if [ -f "$LAUNCH_ENV_FILE" ]; then
-        backup_job=$(grep -A1 "^### Start CommaUtility Backup" "$LAUNCH_ENV_FILE")
-    fi
-
+    backup_loc=$(get_backup_location)
+    backup_job=$(get_backup_job)
     if [ -n "$backup_loc" ]; then
         local label protocol status
         label=$(echo "$backup_loc" | jq -r .label)
         protocol=$(echo "$backup_loc" | jq -r .protocol)
 
-        # Use CommaUtilityRoutes.sh to test the connection
+        # Store the connection test result in the status variable
         if [ "$protocol" = "smb" ]; then
-            test_smb_connection "$backup_loc"
+            status=$(test_smb_connection "$backup_loc")
         else
-            test_ssh_connection "$backup_loc"
+            status=$(test_ssh_connection "$backup_loc")
         fi
 
-        # echo "Status: $status"
-
         if [ "$status" = "Valid" ]; then
-            echo -e "| ├ Network: ${GREEN}$label - Connected${NC}"
+            echo -e "| ├ Network: ${GREEN}$label (Connected)${NC}"
         else
-            echo -e "| ├ Network: ${RED}$label - Disconnected${NC}"
+            echo -e "| ├ Network: ${RED}$label (Disconnected)${NC}"
         fi
 
         if [ -n "$backup_job" ]; then
@@ -62,7 +79,8 @@ display_backup_status_short() {
         echo -e "| ├ Auto-Backup: ${RED}Not Available${NC}"
     fi
 
-    # Find most recent backup
+    ## Find most recent backup with a small delay to allow for file system updates
+    sleep 1 # Add small delay to ensure file system is updated
     local latest_backup
     latest_backup=$(find "$BACKUP_BASE_DIR" -mindepth 1 -maxdepth 1 -type d -exec stat -c "%Y %n" {} \; | sort -nr | head -n1 | cut -d' ' -f2)
 
@@ -73,13 +91,16 @@ display_backup_status_short() {
         backup_size=$(du -sh "$latest_backup" | cut -f1)
 
         # Count total number of backups
-        local total_backups max_label
+        local total_backups max_label total_size
         total_backups=$(find "$BACKUP_BASE_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l)
         max_label="${total_backups}/${MAX_BACKUP_COUNT}"
-
-        # Calculate total size of all backups
-        local total_size
         total_size=$(du -sh "$BACKUP_BASE_DIR" | cut -f1)
+
+        # Get backup contents summary
+        local ssh_files params_files commautil_files
+        ssh_files=$(jq -r '.directories[] | select(.type=="ssh") | .files' "${latest_backup}/${BACKUP_METADATA_FILE}")
+        params_files=$(jq -r '.directories[] | select(.type=="params") | .files' "${latest_backup}/${BACKUP_METADATA_FILE}")
+        commautil_files=$(jq -r '.directories[] | select(.type=="commautil") | .files' "${latest_backup}/${BACKUP_METADATA_FILE}")
 
         echo "| ├ Latest: $(date -d "$backup_timestamp" "+%Y-%m-%d %H:%M")"
         if [ "$backup_age_days" -gt 30 ]; then
@@ -89,16 +110,9 @@ display_backup_status_short() {
         fi
         echo "| ├ Latest Size: $backup_size"
         echo "| ├ Total Size: $total_size (Backups: $max_label)"
-
-        # Get backup contents summary
-        local ssh_files params_files commautil_files
-        ssh_files=$(jq -r '.directories[] | select(.type=="ssh") | .files' "${latest_backup}/${BACKUP_METADATA_FILE}")
-        params_files=$(jq -r '.directories[] | select(.type=="params") | .files' "${latest_backup}/${BACKUP_METADATA_FILE}")
-        commautil_files=$(jq -r '.directories[] | select(.type=="commautil") | .files' "${latest_backup}/${BACKUP_METADATA_FILE}")
         echo "| └ Contents: SSH($ssh_files), Params($params_files), Config($commautil_files) files"
     else
-        echo -e "| ├ Status: ${RED}No backups found${NC}"
-        echo "| └ Action: Run backup to secure your device configuration"
+        echo -e "| └ ${RED}No backups found${NC}"
     fi
 }
 
@@ -117,38 +131,113 @@ backup_device() {
     local backup_name="${device_id}_${timestamp}"
     local backup_dir="${BACKUP_BASE_DIR}/${backup_name}"
 
+    # Only show progress message if not in silent mode
+    [ "$silent_mode" != "silent" ] && print_info "Creating backup in ${backup_dir}..."
+
     # Create backup directory structure
     mkdir -p "${backup_dir}/ssh"
     mkdir -p "${backup_dir}/persist"
     mkdir -p "${backup_dir}/params"
     mkdir -p "${backup_dir}/commautil"
 
-    # Perform backup operations...
-    # [Previous backup logic remains the same]
+    # Track backup success
+    local backup_success=true
 
-    if [ "$silent_mode" = "silent" ]; then
-        echo "{\"status\":\"success\",\"backup_path\":\"$backup_dir\"}"
-    else
-        print_success "Backup completed successfully"
+    # Track component stats for metadata
+    local stats=()
+    local component_stats
 
-        # Check for configured network location
-        local backup_loc
-        backup_loc=$(jq -r '.locations[] | select(.type == "device_backup")' "$NETWORK_CONFIG")
-        if [ -n "$backup_loc" ]; then
-            read -p "Would you like to sync this backup to the configured network location? (y/N): " sync_choice
-            if [[ "$sync_choice" =~ ^[Yy]$ ]]; then
-                local location_id=$(echo "$backup_loc" | jq -r .location_id)
-                sync_backup_to_network "$backup_dir" "$location_id"
-            fi
-        else
-            print_info "No network location configured for backups."
-            read -p "Would you like to configure one now? (y/N): " configure_choice
-            if [[ "$configure_choice" =~ ^[Yy]$ ]]; then
-                manage_network_locations_menu
-            fi
+    # Backup SSH files
+    if [ -d "/home/comma/.ssh" ]; then
+        tar czf "${backup_dir}/ssh/backup.tar.gz" -C "/home/comma/.ssh" . || backup_success=false
+        if [ "$backup_success" = true ]; then
+            local file_count=$(find "/home/comma/.ssh" -type f | wc -l)
+            local size=$(du -b "${backup_dir}/ssh/backup.tar.gz" | cut -f1)
+            component_stats=$(jq -n --arg type "ssh" --arg files "$file_count" --arg size "$size" \
+                '{type: $type, files: $files, size: $size}')
+            stats+=("$component_stats")
         fi
     fi
-    return 0
+
+    # Backup persist files
+    if [ -d "/persist/comma" ]; then
+        tar czf "${backup_dir}/persist/backup.tar.gz" -C "/persist" comma || backup_success=false
+        if [ "$backup_success" = true ]; then
+            local file_count=$(find "/persist/comma" -type f | wc -l)
+            local size=$(du -b "${backup_dir}/persist/backup.tar.gz" | cut -f1)
+            component_stats=$(jq -n --arg type "persist" --arg files "$file_count" --arg size "$size" \
+                '{type: $type, files: $files, size: $size}')
+            stats+=("$component_stats")
+        fi
+    fi
+
+    # Backup params
+    if [ -d "/data/params/d" ]; then
+        tar czf "${backup_dir}/params/backup.tar.gz" -C "/data/params" d || backup_success=false
+        if [ "$backup_success" = true ]; then
+            local file_count=$(find "/data/params/d" -type f | wc -l)
+            local size=$(du -b "${backup_dir}/params/backup.tar.gz" | cut -f1)
+            component_stats=$(jq -n --arg type "params" --arg files "$file_count" --arg size "$size" \
+                '{type: $type, files: $files, size: $size}')
+            stats+=("$component_stats")
+        fi
+    fi
+
+    # Backup commautil
+    if [ -d "/data/commautil" ]; then
+        tar czf "${backup_dir}/commautil/backup.tar.gz" -C "/data" commautil || backup_success=false
+        if [ "$backup_success" = true ]; then
+            local file_count=$(find "/data/commautil" -type f | wc -l)
+            local size=$(du -b "${backup_dir}/commautil/backup.tar.gz" | cut -f1)
+            component_stats=$(jq -n --arg type "commautil" --arg files "$file_count" --arg size "$size" \
+                '{type: $type, files: $files, size: $size}')
+            stats+=("$component_stats")
+        fi
+    fi
+
+    if [ "$backup_success" = true ]; then
+        # Create metadata
+        create_backup_metadata "$backup_dir" "$backup_name" "$device_id" "${stats[@]}"
+
+        if [ "$silent_mode" = "silent" ]; then
+            # In silent mode, just output JSON and don't interact with user
+            echo "{\"status\":\"success\",\"backup_path\":\"$backup_dir\"}"
+        else
+            print_success "Backup completed successfully"
+            echo "Backup location: $backup_dir"
+
+            # Only offer network sync in interactive mode
+            local backup_loc backup_job
+            backup_loc=$(get_backup_location)
+            backup_job=$(get_backup_job)
+
+            if [ -n "$backup_loc" ] && [ "$backup_loc" != "null" ]; then
+                read -p "Would you like to sync this backup to the configured network location? (y/N): " sync_choice
+                if [[ "$sync_choice" =~ ^[Yy]$ ]]; then
+                    local location_id
+                    location_id=$(echo "$backup_loc" | jq -r '.location_id')
+                    if [ -n "$location_id" ] && [ "$location_id" != "null" ]; then
+                        sync_backup_to_network "$backup_dir" "$location_id"
+                    else
+                        print_error "Invalid network location configuration"
+                    fi
+                fi
+            fi
+
+            pause_for_user
+        fi
+        return 0
+    else
+        if [ "$silent_mode" = "silent" ]; then
+            echo "{\"status\":\"error\",\"message\":\"Backup failed\"}"
+        else
+            print_error "Backup failed"
+            pause_for_user
+        fi
+        # Clean up failed backup
+        rm -rf "$backup_dir"
+        return 1
+    fi
 }
 
 cleanup_old_backups() {
@@ -447,115 +536,71 @@ remove_legacy_backup() {
 }
 
 backup_menu() {
+    local backup_loc backup_job has_legacy_backup
+    backup_loc=$(get_backup_location)
+    backup_job=$(get_backup_job)
+    has_legacy_backup=$(has_legacy_backup)
+    protocol=$(echo "$backup_loc" | jq -r '.protocol')
     while true; do
         clear
         echo "+----------------------------------------------+"
         echo "|            Device Backup Manager             |"
         echo "+----------------------------------------------+"
-
-        # Show backup network location status
-        local backup_loc backup_job
-
-        if [ -f "$NETWORK_CONFIG" ]; then
-            backup_loc=$(jq -r '.locations[] | select(.type == "device_backup")' "$NETWORK_CONFIG")
-        fi
-        if [ -f "$LAUNCH_ENV_FILE" ]; then
-            backup_job=$(grep -A1 "^### Start CommaUtility Backup" "$LAUNCH_ENV_FILE")
-        fi
-
-        if [ -n "$backup_loc" ]; then
-            local label protocol status
-            label=$(echo "$backup_loc" | jq -r .label)
-            protocol=$(echo "$backup_loc" | jq -r .protocol)
-
-            # Use CommaUtilityRoutes.sh to test the connection
-            if [ "$protocol" = "smb" ]; then
-                status=$(test_smb_connection "$backup_loc")
-            else
-                status=$(test_ssh_connection "$backup_loc")
-            fi
-
-            if [ "$status" = "Valid" ]; then
-                echo -e "| Network Location: ${GREEN}$label - Connected${NC}"
-            else
-                echo -e "| Network Location: ${RED}$label - Disconnected${NC}"
-            fi
-
-            if [ -n "$backup_job" ]; then
-                echo -e "| Auto-Backup: ${GREEN}Enabled${NC}"
-            else
-                echo -e "| Auto-Backup: ${YELLOW}Disabled${NC}"
-            fi
-        else
-            echo -e "| Network Location: ${YELLOW}Not Configured${NC}"
-            echo -e "| Auto-Backup: ${RED}Not Available${NC}"
-        fi
-
-        # Show latest backup info
-        local latest_backup
-        latest_backup=$(find "$BACKUP_BASE_DIR" -mindepth 1 -maxdepth 1 -type d -exec stat -c "%Y %n" {} \; | sort -nr | head -n1 | cut -d' ' -f2)
-
-        if [ -n "$latest_backup" ] && [ -f "${latest_backup}/${BACKUP_METADATA_FILE}" ]; then
-            local backup_timestamp backup_age_days backup_size
-            backup_timestamp=$(jq -r '.timestamp' "${latest_backup}/${BACKUP_METADATA_FILE}")
-            backup_age_days=$((($(date +%s) - $(date -d "$backup_timestamp" +%s)) / 86400))
-            backup_size=$(du -sh "$latest_backup" | cut -f1)
-
-            # Count total number of backups
-            local total_backups total_size max_label
-            total_backups=$(find "$BACKUP_BASE_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l)
-            total_size=$(du -sh "$BACKUP_BASE_DIR" | cut -f1)
-            max_label="${total_backups}/${MAX_BACKUP_COUNT}"
-
-            echo "| Last Backup: $backup_timestamp"
-            if [ "$backup_age_days" -gt 30 ]; then
-                echo -e "| Backup Age: ${RED}$backup_age_days days old${NC}"
-            else
-                echo -e "| Backup Age: ${GREEN}$backup_age_days days old${NC}"
-            fi
-            echo "| Latest Size: $backup_size"
-            echo "| Total Size: $total_size (Backups: $max_label)"
-        else
-            echo -e "| Last Backup: ${RED}None Found${NC}"
-        fi
-
-        echo "+----------------------------------------------+"
+        display_backup_status_short
+        echo "| "
         echo "| Available Options:"
-        echo "| 1. Create New Backup"
-        echo "| 2. Restore from Backup"
-        echo "| 3. Configure Network Location"
+        echo "| 1.  Create New Backup"
+        echo "| 2.  Restore from Backup"
+        echo "| 3.  View Available Backups"
+        echo "| 4.  Remove Specific Backup"
+        echo "| 5.  Remove All Backups"
+        echo "| 6.  Configure Network Location"
         if [ -n "$backup_loc" ]; then
-            if [ -n "$backup_job" ]; then
-                echo "| 4. Disable Auto-Backup"
-            else
-                echo "| 4. Enable Auto-Backup"
-            fi
-            echo "| 5. Test Network Connection"
-            echo "| 6. Sync Latest Backup to Network"
+            echo "| 7.  Configure Auto-Backup"
+            echo "| 8.  Test Network Connection"
+            echo "| 9.  Network Location Settings"
+            echo "| 10. Sync Latest Backup to Network"
         fi
 
-        if [ -d "/data/ssh_backup" ] && [ -f "/data/ssh_backup/metadata.txt" ]; then
+        if [ "$has_legacy_backup" = "true" ]; then
             echo "| M. Migrate Legacy Backup"
         fi
 
-        echo "| Q. Back to Main Menu"
+        echo "| Q|B. Back to Main Menu"
         echo "+----------------------------------------------+"
 
         read -p "Enter your choice: " choice
         case $choice in
         1) backup_device ;;
         2) restore_backup ;;
-        3) manage_network_locations_menu ;;
-        4)
-            if [ -n "$backup_loc" ]; then
-                if [ -n "$backup_job" ]; then
-                    manage_backup_sync_menu
-                else
-                    manage_jobs_menu
-                fi
-            fi
-            ;;
+        3) view_backup_details ;;
+        4) remove_backup ;;
         5)
+            echo "+----------------------------------------------+"
+            echo "|               Remove All Backups             |"
+            echo "+----------------------------------------------+"
+            echo "| Remove Backups from:"
+            echo "| 1. Local device only"
+            echo "| 2. Network location only"
+            echo "| 3. Both local and network"
+            echo "| Q. Cancel"
+            echo "+----------------------------------------------+"
+            read -p "Select option: " remove_choice
+            case $remove_choice in
+            1) remove_all_backups "false" ;;
+            2) remove_all_backups "true" ;;
+            3)
+                # First remove from network, then local
+                remove_all_backups "true"  # Network
+                remove_all_backups "false" # Local
+                ;;
+            [qQ]) continue ;;
+            *) print_error "Invalid choice" ;;
+            esac
+            ;;
+        6) configure_network_location "device_backup" ;;
+        7) manage_auto_backup_jobs ;;
+        8)
             if [ -n "$backup_loc" ]; then
                 if [ "$protocol" = "smb" ]; then
                     test_smb_connection "$backup_loc"
@@ -565,7 +610,8 @@ backup_menu() {
                 pause_for_user
             fi
             ;;
-        6)
+        9) manage_network_locations_menu ;;
+        10)
             if [ -n "$backup_loc" ] && [ -n "$latest_backup" ]; then
                 local location_id=$(echo "$backup_loc" | jq -r .location_id)
                 sync_backup_to_network "$latest_backup" "$location_id"
@@ -575,15 +621,226 @@ backup_menu() {
             fi
             ;;
         [mM])
-            if [ -d "/data/ssh_backup" ] && [ -f "/data/ssh_backup/metadata.txt" ]; then
+            if [ "$has_legacy_backup" = "true" ]; then
                 migrate_legacy_backup
             else
-                print_error "No old backup format detected"
+                print_error "No legacy backup detected"
                 pause_for_user
             fi
             ;;
-        [qQ]) break ;;
+        [qQ | bB]) break ;;
         *) print_error "Invalid choice." ;;
         esac
     done
+}
+
+view_backup_details() {
+    clear
+    echo "+----------------------------------------------------+"
+    echo "|               Available Backups                     |"
+    echo "+----------------------------------------------------+"
+
+    # List available backups
+    local backups=()
+    local i=1
+    while IFS= read -r backup_dir; do
+        if [ -f "${backup_dir}/${BACKUP_METADATA_FILE}" ]; then
+            backups+=("$backup_dir")
+            local metadata timestamp device_id size components
+            metadata=$(cat "${backup_dir}/${BACKUP_METADATA_FILE}")
+            timestamp=$(echo "$metadata" | jq -r '.timestamp')
+            device_id=$(echo "$metadata" | jq -r '.device_id')
+            size=$(du -sh "$backup_dir" | cut -f1)
+
+            echo "Backup #$i:"
+            echo "├─ Date: $(date -d "$timestamp" "+%Y-%m-%d %H:%M")"
+            echo "├─ Device ID: $device_id"
+            echo "├─ Size: $size"
+            echo "├─ Components:"
+            echo "$metadata" | jq -r '.directories[] | "│  └─ \(.type): \(.files) files (\(.size) bytes)"'
+            echo "│"
+            ((i++))
+        fi
+    done < <(find "$BACKUP_BASE_DIR" -mindepth 1 -maxdepth 1 -type d | sort -r)
+
+    if [ ${#backups[@]} -eq 0 ]; then
+        echo "No backups found"
+    fi
+
+    pause_for_user
+}
+
+remove_backup() {
+    local backup_dir="$1"
+    local network_only="${2:-false}"
+    local silent_mode="${3:-normal}"
+
+    if [ ! -d "$backup_dir" ]; then
+        [ "$silent_mode" != "silent" ] && print_error "Backup directory not found: $backup_dir"
+        return 1
+    fi
+
+    # Get network location info if exists
+    local network_loc location_id
+    if [ -f "$NETWORK_CONFIG" ]; then
+        network_loc=$(jq -r '.locations[] | select(.type == "device_backup")' "$NETWORK_CONFIG")
+        location_id=$(echo "$network_loc" | jq -r '.location_id')
+    fi
+
+    # Remove from network if configured
+    if [ -n "$network_loc" ] && [ -n "$location_id" ]; then
+        [ "$silent_mode" != "silent" ] && print_info "Removing backup from network location..."
+        remove_backup_from_network "$backup_dir" "$location_id"
+    fi
+
+    # Remove local backup unless network_only is true
+    if [ "$network_only" = "false" ]; then
+        [ "$silent_mode" != "silent" ] && print_info "Removing local backup..."
+        rm -rf "$backup_dir"
+        [ "$silent_mode" != "silent" ] && print_success "Backup removed successfully"
+    fi
+
+    return 0
+}
+
+remove_backup_from_network() {
+    local backup_dir="$1"
+    local location_id="$2"
+
+    local location
+    location=$(jq -r --arg id "$location_id" '.locations[] | select(.location_id == $id)' "$NETWORK_CONFIG")
+    if [ -z "$location" ] || [ "$location" = "null" ]; then
+        print_error "Network location not found"
+        return 1
+    fi
+
+    local device_id=$(get_device_id)
+    local backup_name=$(basename "$backup_dir")
+    local remote_path
+
+    # Build remote path
+    local base_path
+    base_path=$(echo "$location" | jq -r '.path')
+    remote_path="${base_path%/}/${device_id}/backups/${backup_name}"
+
+    local protocol
+    protocol=$(echo "$location" | jq -r '.protocol')
+
+    case "$protocol" in
+    smb)
+        local server share username password
+        server=$(echo "$location" | jq -r .server)
+        share=$(echo "$location" | jq -r .share)
+        username=$(echo "$location" | jq -r .username)
+        password=$(decrypt_credentials "$(echo "$location" | jq -r .credential_file)")
+
+        smbclient "//${server}/${share}" -U "${username}%${password}" \
+            -c "deltree \"$remote_path\"" >/dev/null 2>&1
+        ;;
+    ssh)
+        local server port username auth_type
+        server=$(echo "$location" | jq -r .server)
+        port=$(echo "$location" | jq -r .port)
+        username=$(echo "$location" | jq -r .username)
+        auth_type=$(echo "$location" | jq -r .auth_type)
+
+        if [ "$auth_type" = "password" ]; then
+            local password
+            password=$(decrypt_credentials "$(echo "$location" | jq -r .credential_file)")
+            sshpass -p "$password" ssh -p "$port" "$username@$server" "rm -rf '$remote_path'"
+        else
+            local key_path
+            key_path=$(echo "$location" | jq -r .key_path)
+            ssh -p "$port" -i "$key_path" "$username@$server" "rm -rf '$remote_path'"
+        fi
+        ;;
+    esac
+}
+
+remove_all_backups() {
+    local network_only="${1:-false}"
+    local silent_mode="${2:-normal}"
+
+    if [ "$silent_mode" != "silent" ]; then
+        echo "WARNING: This will remove all backups"
+        if [ "$network_only" = "true" ]; then
+            echo "from the network location only."
+        else
+            echo "both locally and from the network location."
+        fi
+        read -p "Are you sure you want to continue? (y/N): " confirm
+        [[ ! "$confirm" =~ ^[Yy]$ ]] && return 1
+    fi
+
+    local backups=()
+    while IFS= read -r backup_dir; do
+        backups+=("$backup_dir")
+    done < <(find "$BACKUP_BASE_DIR" -mindepth 1 -maxdepth 1 -type d)
+
+    for backup_dir in "${backups[@]}"; do
+        remove_backup "$backup_dir" "$network_only" "$silent_mode"
+    done
+
+    [ "$silent_mode" != "silent" ] && print_success "All backups removed successfully"
+    return 0
+}
+
+select_backup_for_removal() {
+    clear
+    echo "+----------------------------------------------------+"
+    echo "|               Select Backup to Remove               |"
+    echo "+----------------------------------------------------+"
+
+    # List available backups
+    local backups=()
+    local i=1
+    while IFS= read -r backup_dir; do
+        if [ -f "${backup_dir}/${BACKUP_METADATA_FILE}" ]; then
+            backups+=("$backup_dir")
+            local timestamp size
+            timestamp=$(jq -r .timestamp "${backup_dir}/${BACKUP_METADATA_FILE}")
+            size=$(du -sh "$backup_dir" | cut -f1)
+            echo "$i) $(date -d "$timestamp" "+%Y-%m-%d %H:%M") - Size: $size"
+            ((i++))
+        fi
+    done < <(find "$BACKUP_BASE_DIR" -mindepth 1 -maxdepth 1 -type d | sort -r)
+
+    if [ ${#backups[@]} -eq 0 ]; then
+        print_error "No backups found"
+        pause_for_user
+        return 1
+    fi
+
+    echo "Q) Cancel"
+    echo "+----------------------------------------------------+"
+    read -p "Select backup to remove: " choice
+
+    case $choice in
+    [qQ]) return 1 ;;
+    *)
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#backups[@]}" ]; then
+            local selected_backup="${backups[$((choice - 1))]}"
+            echo "Selected: $selected_backup"
+
+            echo "Remove from:"
+            echo "1. Local device only"
+            echo "2. Network location only"
+            echo "3. Both local and network"
+            echo "Q. Cancel"
+            read -p "Select option: " remove_choice
+
+            case $remove_choice in
+            1) remove_backup "$selected_backup" "false" ;;
+            2) remove_backup "$selected_backup" "true" ;;
+            3) remove_backup "$selected_backup" "false" ;;
+            [qQ]) return 1 ;;
+            *) print_error "Invalid choice" ;;
+            esac
+        else
+            print_error "Invalid selection"
+            pause_for_user
+            return 1
+        fi
+        ;;
+    esac
 }
