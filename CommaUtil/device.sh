@@ -1,10 +1,14 @@
 #!/bin/bash
-
 ###############################################################################
-# Global Variables
+# device.sh - Device Management Functions for CommaUtility
+#
+# Version: DEVICE_SCRIPT_VERSION="3.0.3"
+# Last Modified: 2025-02-09
+#
+# This script manages device status, controls, and statistics.
 ###############################################################################
-readonly DEVICE_SCRIPT_VERSION="3.0.2"
-readonly DEVICE_SCRIPT_MODIFIED="2025-02-08"
+readonly DEVICE_SCRIPT_VERSION="3.0.3"
+readonly DEVICE_SCRIPT_MODIFIED="2025-02-09"
 
 ###############################################################################
 # System Status & Logs

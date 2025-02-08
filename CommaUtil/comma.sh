@@ -1,10 +1,14 @@
 #!/bin/bash
-
 ###############################################################################
-# Global Variables
+# comma.sh - Device Operations for CommaUtility
+#
+# Version: COMMA_SCRIPT_VERSION="3.0.3"
+# Last Modified: 2025-02-09
+#
+# This script manages device operations (boot and logo update, log files, etc.)
 ###############################################################################
-readonly COMMA_SCRIPT_VERSION="3.0.2"
-readonly COMMA_SCRIPT_MODIFIED="2025-02-08"
+readonly COMMA_SCRIPT_VERSION="3.0.3"
+readonly COMMA_SCRIPT_MODIFIED="2025-02-09"
 
 ###############################################################################
 # Boot & Logo Update Functions

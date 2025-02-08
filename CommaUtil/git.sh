@@ -1,10 +1,15 @@
 #!/bin/bash
 
 ###############################################################################
-# Global Variables
+# git.sh - Device Git Operations for CommaUtility
+#
+# Version: GIT_SCRIPT_VERSION="3.0.3"
+# Last Modified: 2025-02-09
+#
+# This script manages device Git operations (clone, branch, etc.)
 ###############################################################################
-readonly GIT_SCRIPT_VERSION="3.0.2"
-readonly GIT_SCRIPT_MODIFIED="2025-02-08"
+readonly GIT_SCRIPT_VERSION="3.0.3"
+readonly GIT_SCRIPT_MODIFIED="2025-02-09"
 
 ###############################################################################
 # Git Status Functions

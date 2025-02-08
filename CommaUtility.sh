@@ -2,8 +2,6 @@
 ###############################################################################
 # CommaUtility.sh - Main Script
 #
-# Version: MAIN_SCRIPT_VERSION="1.0.0"
-# Last Modified: "2025-02-XX"
 #
 # This script loads all modules, checks for updates and then launches the
 # main menu/argument handler.
@@ -12,8 +10,8 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly SCRIPT_VERSION="3.0.2"
-readonly SCRIPT_MODIFIED="2025-02-08"
+readonly SCRIPT_VERSION="3.0.3"
+readonly SCRIPT_MODIFIED="2025-02-09"
 readonly SCRIPT_BRANCH="test"
 
 # We unify color-coded messages in a single block for consistency:
@@ -631,8 +629,8 @@ main() {
             ;;
 
         # SSH operations
-        test_ssh)
-            test_ssh_connection
+        test_github_ssh)
+            test_github_ssh
             ;;
         reset_ssh)
             reset_ssh

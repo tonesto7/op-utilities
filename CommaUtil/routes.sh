@@ -1,10 +1,14 @@
 #!/bin/bash
-
 ###############################################################################
-# Global Variables
+# routes.sh - Device Route Management Functions for CommaUtility
+#
+# Version: ROUTES_SCRIPT_VERSION="3.0.3"
+# Last Modified: 2025-02-09
+#
+# This script manages device route operations (sync, concatenate, etc.)
 ###############################################################################
-readonly ROUTES_SCRIPT_VERSION="3.0.2"
-readonly ROUTES_SCRIPT_MODIFIED="2025-02-08"
+readonly ROUTES_SCRIPT_VERSION="3.0.3"
+readonly ROUTES_SCRIPT_MODIFIED="2025-02-09"
 
 # Routes Related Constants
 readonly ROUTES_DIR="/data/media/0/realdata"

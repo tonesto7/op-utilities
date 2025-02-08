@@ -1,10 +1,15 @@
 #!/bin/bash
-
 ###############################################################################
-# Global Variables
+# builds.sh - Device Build and Management Operations for CommaUtility
+#
+# Version: BUILDS_SCRIPT_VERSION="3.0.3"
+# Last Modified: 2025-02-09
+#
+# This script manages device build operations (Openpilot, BluePilot, etc.)
+# including cloning, building, and managing branches.
 ###############################################################################
-readonly BUILDS_SCRIPT_VERSION="3.0.2"
-readonly BUILDS_SCRIPT_MODIFIED="2025-02-08"
+readonly BUILDS_SCRIPT_VERSION="3.0.3"
+readonly BUILDS_SCRIPT_MODIFIED="2025-02-09"
 
 # Variables from build_bluepilot script
 SCRIPT_ACTION=""

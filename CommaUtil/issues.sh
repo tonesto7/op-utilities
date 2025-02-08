@@ -1,10 +1,14 @@
 #!/bin/bash
-
 ###############################################################################
-# Global Variables
+# issues.sh - Device Issue Detection and Resolution for CommaUtility
+#
+# Version: ISSUES_SCRIPT_VERSION="3.0.3"
+# Last Modified: 2025-02-09
+#
+# This script detects and resolves issues on the device.
 ###############################################################################
-readonly ISSUES_SCRIPT_VERSION="3.0.2"
-readonly ISSUES_SCRIPT_MODIFIED="2025-02-08"
+readonly ISSUES_SCRIPT_VERSION="3.0.3"
+readonly ISSUES_SCRIPT_MODIFIED="2025-02-09"
 
 # Array-based detection data
 declare -A ISSUE_FIXES

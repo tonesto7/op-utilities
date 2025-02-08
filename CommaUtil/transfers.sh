@@ -1,10 +1,14 @@
 #!/bin/bash
-
 ###############################################################################
-# Global Variables
+# transfers.sh - Device Transfer and Sync Operations for CommaUtility
+#
+# Version: TRANSFERS_SCRIPT_VERSION="3.0.3"
+# Last Modified: 2025-02-09
+#
+# This script manages device transfer and sync operations (SMB, SSH, etc.)
 ###############################################################################
-readonly TRANSFERS_SCRIPT_VERSION="3.0.2"
-readonly TRANSFERS_SCRIPT_MODIFIED="2025-02-08"
+readonly TRANSFERS_SCRIPT_VERSION="3.0.3"
+readonly TRANSFERS_SCRIPT_MODIFIED="2025-02-09"
 
 ###############################################################################
 # Transfer Management Functions
@@ -23,7 +27,7 @@ verify_network_connectivity() {
         }
     else
         local status
-        status=$(test_ssh_connection "$location")
+        status=$(test_network_ssh "$location")
         [ "$status" = "Valid" ] || {
             print_error "SSH connection failed: $status"
             return 1
@@ -703,7 +707,7 @@ sync_all_routes() {
     if [ "$protocol" = "smb" ]; then
         status=$(test_smb_connection "$route_loc")
     else
-        status=$(test_ssh_connection "$route_loc")
+        status=$(test_network_ssh "$route_loc")
     fi
 
     if [ "$status" != "Valid" ]; then
@@ -1489,7 +1493,7 @@ test_all_connections() {
         if [ "$protocol" = "smb" ]; then
             status=$(test_smb_connection "$route_loc")
         else
-            status=$(test_ssh_connection "$route_loc")
+            status=$(test_network_ssh "$route_loc")
         fi
         if [ "$status" = "Valid" ]; then
             echo -e "${GREEN}Connected${NC}"
@@ -1512,7 +1516,7 @@ test_all_connections() {
         if [ "$protocol" = "smb" ]; then
             status=$(test_smb_connection "$backup_loc")
         else
-            status=$(test_ssh_connection "$backup_loc")
+            status=$(test_network_ssh "$backup_loc")
         fi
         if [ "$status" = "Valid" ]; then
             echo -e "${GREEN}Connected${NC}"
@@ -1555,6 +1559,37 @@ test_smb_connection() {
         echo "$output"
         return 1
     fi
+}
+
+test_network_ssh() {
+    local location="$1"
+    local server port username auth_type
+
+    server=$(echo "$location" | jq -r .server)
+    port=$(echo "$location" | jq -r .port)
+    username=$(echo "$location" | jq -r .username)
+    auth_type=$(echo "$location" | jq -r .auth_type)
+
+    local ssh_cmd="ssh -p $port -o BatchMode=yes -o ConnectTimeout=5"
+
+    if [ "$auth_type" = "password" ]; then
+        local password
+        password=$(decrypt_credentials "$(echo "$location" | jq -r .credential_file)")
+        if sshpass -p "$password" $ssh_cmd "$username@$server" 'exit' 2>/dev/null; then
+            echo "Valid"
+            return 0
+        fi
+    else
+        local key_path
+        key_path=$(echo "$location" | jq -r .key_path)
+        if $ssh_cmd -i "$key_path" "$username@$server" 'exit' 2>/dev/null; then
+            echo "Valid"
+            return 0
+        fi
+    fi
+
+    echo "Connection failed"
+    return 1
 }
 
 remove_network_location() {
@@ -1624,7 +1659,7 @@ manage_network_locations_menu() {
             if [ "$protocol" = "smb" ]; then
                 status=$(test_smb_connection "$route_loc")
             else
-                status=$(test_ssh_connection "$route_loc")
+                status=$(test_network_ssh "$route_loc")
             fi
             if [ "$status" = "Valid" ]; then
                 echo -e "│ Route Sync Location:"
@@ -1651,7 +1686,7 @@ manage_network_locations_menu() {
             if [ "$protocol" = "smb" ]; then
                 status=$(test_smb_connection "$backup_loc")
             else
-                status=$(test_ssh_connection "$backup_loc")
+                status=$(test_network_ssh "$backup_loc")
             fi
             if [ "$status" = "Valid" ]; then
                 echo -e "│ Device Backup Location:"

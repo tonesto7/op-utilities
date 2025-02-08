@@ -1,10 +1,14 @@
 #!/bin/bash
-
 ###############################################################################
-# Global Variables
+# storage.sh - Device Storage Management Functions for CommaUtility
+#
+# Version: STORAGE_SCRIPT_VERSION="3.0.3"
+# Last Modified: 2025-02-09
+#
+# This script manages device storage operations (disk space, filesystem, etc.)
 ###############################################################################
-readonly STORAGE_SCRIPT_VERSION="3.0.2"
-readonly STORAGE_SCRIPT_MODIFIED="2025-02-08"
+readonly STORAGE_SCRIPT_VERSION="3.0.3"
+readonly STORAGE_SCRIPT_MODIFIED="2025-02-09"
 
 ###############################################################################
 # Disk Space Management
