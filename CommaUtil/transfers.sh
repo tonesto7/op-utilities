@@ -1619,10 +1619,6 @@ remove_network_location() {
 }
 
 manage_network_locations_menu() {
-    if ! command -v smbclient >/dev/null 2>&1; then
-        print_error "smbclient not found. Installing..."
-        sudo apt update && sudo apt install -y smbclient
-    fi
     while true; do
         clear
         echo "+----------------------------------------------+"
