@@ -71,6 +71,12 @@ readonly CREDENTIALS_DIR="$CONFIG_DIR/credentials"
 readonly TRANSFER_STATE_DIR="$CONFIG_DIR/transfer_state"
 readonly LAUNCH_ENV="/data/openpilot/launch_env.sh"
 
+# Backup Variables
+readonly SSH_BACKUP_DIR="$CONFIG_DIR/backups/ssh"
+# readonly BACKUP_BASE_DIR="/data/device_backup"
+# readonly BACKUP_METADATA_FILE="metadata.json"
+# readonly BACKUP_CHECKSUM_FILE="checksum.sha256"
+
 # Module Directory and Modules
 readonly MODULE_DIR="$CONFIG_DIR/modules"
 readonly MODULES=("backups.sh" "device.sh" "issues.sh" "network.sh" "repo.sh" "routes.sh" "ssh.sh" "storage.sh" "transfers.sh" "utils.sh")

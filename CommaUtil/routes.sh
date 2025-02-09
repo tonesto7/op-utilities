@@ -43,23 +43,6 @@ is_valid_route() {
     [[ -n "$route" && -d "$ROUTES_DIR/$route" ]]
 }
 
-sync_single_route() {
-    local route_base="$1"
-    local network_id="$2"
-
-    if ! verify_route_exists "$route_base"; then
-        print_error "Route $route_base not found"
-        return 1
-    fi
-
-    local location
-    location=$(get_network_location_by_id "$network_id") || return 1
-    local protocol
-    protocol=$(echo "$location" | jq -r 'if has("share") then "smb" else "ssh" end')
-
-    transfer_route "$route_base" "$location" "$protocol"
-}
-
 format_route_timestamp() {
     local route_dir="$1"
     local first_segment

@@ -16,19 +16,38 @@ readonly SSH_SCRIPT_MODIFIED="2025-02-09"
 ###############################################################################
 
 backup_ssh() {
-    # clear
     print_info "Backing up SSH files..."
+    local backup_success=false
+
+    # Create backup directories
+    mkdir -p "$SSH_BACKUP_DIR/.ssh"
+    mkdir -p "$SSH_BACKUP_DIR/persist_comma"
+
+    # Backup home directory SSH files if they exist
     if [ -f "/home/comma/.ssh/github" ] &&
         [ -f "/home/comma/.ssh/github.pub" ] &&
         [ -f "/home/comma/.ssh/config" ]; then
-        mkdir -p "/data/ssh_backup"
-        cp "/home/comma/.ssh/github" "/data/ssh_backup/"
-        cp "/home/comma/.ssh/github.pub" "/data/ssh_backup/"
-        cp "/home/comma/.ssh/config" "/data/ssh_backup/"
-        sudo chown comma:comma "/data/ssh_backup" -R
-        sudo chmod 600 "/data/ssh_backup/github"
-        save_backup_metadata
-        print_success "SSH files backed up successfully to /data/ssh_backup/"
+        cp "/home/comma/.ssh/github" "$SSH_BACKUP_DIR/.ssh/"
+        cp "/home/comma/.ssh/github.pub" "$SSH_BACKUP_DIR/.ssh/"
+        cp "/home/comma/.ssh/config" "$SSH_BACKUP_DIR/.ssh/"
+        backup_success=true
+    fi
+
+    # Backup /persist/comma directory if it exists
+    if [ -d "/persist/comma" ]; then
+        cp -R "/persist/comma/." "$SSH_BACKUP_DIR/persist_comma/"
+        backup_success=true
+    fi
+
+    if [ "$backup_success" = true ]; then
+        # Set correct permissions
+        sudo chown comma:comma "$SSH_BACKUP_DIR" -R
+        sudo chmod 700 "$SSH_BACKUP_DIR/.ssh"
+        sudo chmod 600 "$SSH_BACKUP_DIR/.ssh/github"
+        sudo chmod 700 "$SSH_BACKUP_DIR/persist_comma"
+
+        save_ssh_backup_metadata
+        print_success "SSH files backed up successfully to $SSH_BACKUP_DIR/"
     else
         print_warning "No valid SSH files found to backup."
     fi
@@ -37,7 +56,6 @@ backup_ssh() {
 
 # Restore SSH files from backup with verification
 restore_ssh() {
-    # clear
     print_info "Restoring SSH files..."
     if check_ssh_backup; then
         if ! verify_backup_integrity; then
@@ -47,7 +65,7 @@ restore_ssh() {
         fi
 
         print_info "Found backup with the following information:"
-        get_backup_metadata
+        get_ssh_backup_metadata
         read -p "Do you want to proceed with restore? (y/N): " confirm
         if [[ $confirm =~ ^[Yy]$ ]]; then
             # Always clean both locations before restore
@@ -55,11 +73,20 @@ restore_ssh() {
 
             # Restore to home directory
             mkdir -p /home/comma/.ssh
-            cp /data/ssh_backup/github /home/comma/.ssh/
-            cp /data/ssh_backup/github.pub /home/comma/.ssh/
-            cp /data/ssh_backup/config /home/comma/.ssh/
+            cp "$SSH_BACKUP_DIR/.ssh/github" "/home/comma/.ssh/"
+            cp "$SSH_BACKUP_DIR/.ssh/github.pub" "/home/comma/.ssh/"
+            cp "$SSH_BACKUP_DIR/.ssh/config" "/home/comma/.ssh/"
             sudo chown comma:comma /home/comma/.ssh -R
+            sudo chmod 700 /home/comma/.ssh
             sudo chmod 600 /home/comma/.ssh/github
+
+            # Restore persist_comma directory if it exists in backup
+            if [ -d "$SSH_BACKUP_DIR/persist_comma" ]; then
+                mkdir -p /persist/comma
+                cp -R "$SSH_BACKUP_DIR/persist_comma/." "/persist/comma/"
+                sudo chown comma:comma /persist/comma -R
+                sudo chmod 700 /persist/comma
+            fi
 
             # Ensure persistent storage is updated
             copy_ssh_config_and_keys
@@ -97,22 +124,55 @@ restart_ssh_agent() {
     fi
 }
 
-display_ssh_status_short() {
-    print_info "| SSH Status:"
-    if [ -f "/home/comma/.ssh/github" ]; then
-        echo "| └─ Key: Found"
-        if [ -f "/data/ssh_backup/metadata.txt" ]; then
-            local last_backup
-            last_backup=$(grep "Backup Date:" /data/ssh_backup/metadata.txt | cut -d: -f2- | xargs)
-            echo "| └─ Backup: Last Backup $last_backup"
-        fi
+save_ssh_backup_metadata() {
+    local backup_time
+    backup_time=$(date '+%Y-%m-%d %H:%M:%S')
+    cat >"$SSH_BACKUP_DIR/metadata.txt" <<EOF
+Backup Date: $backup_time
+Last SSH Test: $backup_time
+Backup Contents:
+- ~/.ssh/ files
+- /persist/comma/ contents
+EOF
+}
+
+get_ssh_backup_metadata() {
+    if [ -f "$SSH_BACKUP_DIR/metadata.txt" ]; then
+        echo "Backup Information:"
+        cat "$SSH_BACKUP_DIR/metadata.txt"
+        echo ""
+
+        # Show file counts
+        local ssh_files
+        local persist_files
+        ssh_files=$(find "$SSH_BACKUP_DIR/.ssh" -type f | wc -l)
+        persist_files=$(find "$SSH_BACKUP_DIR/persist_comma" -type f | wc -l)
+
+        echo "File Counts:"
+        echo "- SSH files: $ssh_files"
+        echo "- Persist files: $persist_files"
+    else
+        print_warning "No backup metadata found"
     fi
 }
 
-# Display detailed SSH status
-# Returns:
-# - 0: Success
-# - 1: Failure
+display_ssh_status_short() {
+    print_info "│ SSH Status:"
+    if [ -f "/home/comma/.ssh/github" ]; then
+        echo "│ ├─ SSH Key: Found in ~/.ssh/"
+        if [ -d "/persist/comma" ]; then
+            echo "│ ├─ Persist: Found in /persist/comma/"
+        fi
+        if [ -f "$SSH_BACKUP_DIR/.ssh/github" ]; then
+            local last_backup
+            last_backup=$(grep "Backup Date:" "$SSH_BACKUP_DIR/metadata.txt" | cut -d: -f2- | xargs)
+            echo "│ └─ Backup: Last backup $last_backup"
+        fi
+    else
+        echo "│ └─ SSH Key: Not found"
+    fi
+}
+
 display_ssh_status() {
     echo "┌───────────────────────────────────────────────┐"
     echo "│                  SSH Status                   │"
@@ -127,8 +187,8 @@ display_ssh_status() {
     local backup_age
     local backup_days
 
-    if [ -f "/data/ssh_backup/metadata.txt" ]; then
-        backup_date=$(grep "Backup Date:" /data/ssh_backup/metadata.txt | cut -d: -f2- | xargs)
+    if [ -f "$SSH_BACKUP_DIR/metadata.txt" ]; then
+        backup_date=$(grep "Backup Date:" "$SSH_BACKUP_DIR/metadata.txt" | cut -d: -f2- | xargs)
         backup_age=$(($(date +%s) - $(date -d "$backup_date" +%s)))
         backup_days=$((backup_age / 86400))
     fi
@@ -153,17 +213,17 @@ display_ssh_status() {
     fi
 
     # Backup status
-    if [ -f "/data/ssh_backup/github" ] &&
-        [ -f "/data/ssh_backup/github.pub" ] &&
-        [ -f "/data/ssh_backup/config" ]; then
+    if [ -f "$SSH_BACKUP_DIR/github" ] &&
+        [ -f "$SSH_BACKUP_DIR/github.pub" ] &&
+        [ -f "$SSH_BACKUP_DIR/config" ]; then
         echo -e "${NC}│${GREEN} SSH Backup Status: ✅${NC}"
-        if [ -f "/data/ssh_backup/metadata.txt" ]; then
+        if [ -f "$SSH_BACKUP_DIR/metadata.txt" ]; then
             echo -e "│  └─ Last Backup: $backup_date"
             if [ "$backup_days" -gt 30 ]; then
                 echo -e "${NC}│${YELLOW}  └─ Warning: Backup is $backup_days days old${NC}"
             fi
             if [ -f "/home/comma/.ssh/github" ]; then
-                if diff -q "/home/comma/.ssh/github" "/data/ssh_backup/github" >/dev/null; then
+                if diff -q "/home/comma/.ssh/github" "$SSH_BACKUP_DIR/github" >/dev/null; then
                     echo -e "│  └─ Backup is current with active SSH files"
                 else
                     echo -e "${NC}│${YELLOW}  └─ Backup differs from active SSH files${NC}"
@@ -194,9 +254,10 @@ EOF
 
 check_ssh_backup() {
     # Return 0 if valid backup found, else 1
-    if [ -f "/data/ssh_backup/github" ] &&
-        [ -f "/data/ssh_backup/github.pub" ] &&
-        [ -f "/data/ssh_backup/config" ]; then
+    if [ -f "$SSH_BACKUP_DIR/.ssh/github" ] &&
+        [ -f "$SSH_BACKUP_DIR/.ssh/github.pub" ] &&
+        [ -f "$SSH_BACKUP_DIR/.ssh/config" ] &&
+        [ -d "$SSH_BACKUP_DIR/persist_comma" ]; then
         return 0
     else
         return 1
@@ -213,12 +274,47 @@ ssh_operation_with_timeout() {
 }
 
 verify_backup_integrity() {
-    local backup_dir="/data/ssh_backup"
+    local backup_dir="$SSH_BACKUP_DIR"
+
+    # Check if backup directories exist
+    if [ ! -d "$backup_dir/.ssh" ] || [ ! -d "$backup_dir/persist_comma" ]; then
+        print_error "Missing required backup directories"
+        return 1
+    fi
+
+    # Check SSH file permissions and content
     for file in "github" "github.pub" "config"; do
-        if [ ! -f "$backup_dir/$file" ] || [ ! -s "$backup_dir/$file" ]; then
+        local file_path="$backup_dir/.ssh/$file"
+        if [ ! -f "$file_path" ] || [ ! -s "$file_path" ]; then
+            print_error "Missing or empty SSH file: $file"
+            return 1
+        fi
+
+        # Check permissions
+        local perms
+        perms=$(stat -c "%a" "$file_path")
+        if [ "$file" = "github" ] && [ "$perms" != "600" ]; then
+            print_error "Incorrect permissions on $file"
             return 1
         fi
     done
+
+    # Check .ssh directory permissions
+    local ssh_perms
+    ssh_perms=$(stat -c "%a" "$backup_dir/.ssh")
+    if [ "$ssh_perms" != "700" ]; then
+        print_error "Incorrect permissions on .ssh backup directory"
+        return 1
+    fi
+
+    # Check persist_comma directory permissions
+    local persist_perms
+    persist_perms=$(stat -c "%a" "$backup_dir/persist_comma")
+    if [ "$persist_perms" != "700" ]; then
+        print_error "Incorrect permissions on persist_comma backup directory"
+        return 1
+    fi
+
     return 0
 }
 
@@ -278,19 +374,19 @@ test_ssh_connection() {
         local test_date
         test_date=$(date '+%Y-%m-%d %H:%M:%S')
 
-        if [ -f "/data/ssh_backup/metadata.txt" ]; then
+        if [ -f "$SSH_BACKUP_DIR/metadata.txt" ]; then
             # Check if Last SSH Test line exists
-            if grep -q "Last SSH Test:" "/data/ssh_backup/metadata.txt"; then
+            if grep -q "Last SSH Test:" "$SSH_BACKUP_DIR/metadata.txt"; then
                 # Update existing line
-                sed -i "s/Last SSH Test:.*/Last SSH Test: $test_date/" "/data/ssh_backup/metadata.txt"
+                sed -i "s/Last SSH Test:.*/Last SSH Test: $test_date/" "$SSH_BACKUP_DIR/metadata.txt"
             else
                 # Append new line if it doesn't exist
-                echo "Last SSH Test: $test_date" >>"/data/ssh_backup/metadata.txt"
+                echo "Last SSH Test: $test_date" >>"$SSH_BACKUP_DIR/metadata.txt"
             fi
         else
             # Create new metadata file if it doesn't exist
-            mkdir -p "/data/ssh_backup"
-            cat >"/data/ssh_backup/metadata.txt" <<EOF
+            mkdir -p "$SSH_BACKUP_DIR"
+            cat >"$SSH_BACKUP_DIR/metadata.txt" <<EOF
 Backup Date: Not backed up
 Last SSH Test: $test_date
 EOF
@@ -423,14 +519,28 @@ reset_ssh() {
 
 copy_ssh_config_and_keys() {
     mount_rw
-    print_info "Copying SSH config and keys to /usr/default/home/comma/.ssh/..."
+    print_info "Copying SSH config and keys to persistent storage..."
+
+    # Copy to /usr/default/home/comma/.ssh/
     if [ ! -d /usr/default/home/comma/.ssh/ ]; then
         sudo mkdir -p /usr/default/home/comma/.ssh/
     fi
     sudo cp /home/comma/.ssh/config /usr/default/home/comma/.ssh/
     sudo cp /home/comma/.ssh/github* /usr/default/home/comma/.ssh/
+
+    # Set permissions
     sudo chown comma:comma /usr/default/home/comma/.ssh/ -R
+    sudo chmod 700 /usr/default/home/comma/.ssh/
     sudo chmod 600 /usr/default/home/comma/.ssh/github
+
+    # Ensure persist/comma exists with correct permissions
+    if [ ! -d /persist/comma ]; then
+        sudo mkdir -p /persist/comma
+        sudo chown comma:comma /persist/comma
+        sudo chmod 700 /persist/comma
+    fi
+
+    print_success "SSH files copied to persistent storage"
 }
 
 get_ssh_key() {
@@ -465,8 +575,17 @@ remove_ssh_contents() {
     clear
     mount_rw
     print_info "Removing SSH folder contents..."
+
+    # Remove home .ssh contents
     rm -rf /home/comma/.ssh/*
+
+    # Remove persist/comma contents
+    sudo rm -rf /persist/comma/*
+
+    # Remove persistent storage .ssh contents
     sudo rm -rf /usr/default/home/comma/.ssh/*
+
+    print_success "SSH contents removed from all locations"
 }
 
 import_ssh_keys() {

@@ -111,9 +111,9 @@ detect_issues() {
     # fi
 
     # Check backup age if it exists
-    if [ "$backup_exists" = true ] && [ -f "/data/ssh_backup/metadata.txt" ]; then
+    if [ "$backup_exists" = true ] && [ -f "$SSH_BACKUP_DIR/metadata.txt" ]; then
         local backup_date
-        backup_date=$(grep "Backup Date:" /data/ssh_backup/metadata.txt | cut -d: -f2- | xargs)
+        backup_date=$(grep "Backup Date:" "$SSH_BACKUP_DIR/metadata.txt" | cut -d: -f2- | xargs)
         if [ -n "$backup_date" ]; then
             local backup_age
             local backup_days
