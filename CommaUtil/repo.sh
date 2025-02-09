@@ -11,34 +11,15 @@
 readonly REPO_SCRIPT_VERSION="3.0.0"
 readonly REPO_SCRIPT_MODIFIED="2025-02-09"
 
-# OS checks and directories
-readonly OS=$(uname)
-readonly GIT_BP_PUBLIC_REPO="git@github.com:BluePilotDev/bluepilot.git"
-readonly GIT_BP_PRIVATE_REPO="git@github.com:ford-op/sp-dev-c3.git"
-readonly GIT_OP_PRIVATE_FORD_REPO="git@github.com:ford-op/openpilot.git"
-readonly GIT_SP_REPO="git@github.com:sunnypilot/sunnypilot.git"
-readonly GIT_COMMA_REPO="git@github.com:commaai/openpilot.git"
-
-if [ "$OS" = "Darwin" ]; then
-    readonly BUILD_DIR="$HOME/Documents/bluepilot-utility/bp-build"
-    readonly SCRIPT_DIR=$(dirname "$0")
-else
-    readonly BUILD_DIR="/data/openpilot"
-    # Get absolute path of script regardless of where it's called from
-    readonly SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd || echo "/data")
-    if [ "$SCRIPT_DIR" = "" ]; then
-        print_error "Error: Could not determine script directory"
-        exit 1
-    fi
-fi
-
-readonly TMP_DIR="${BUILD_DIR}-build-tmp"
-
 # Variables from build_bluepilot script
 SCRIPT_ACTION=""
 REPO=""
 CLONE_BRANCH=""
 BUILD_BRANCH=""
+
+###############################################################################
+# Git Operations
+###############################################################################
 
 reset_variables() {
     SCRIPT_ACTION=""
@@ -46,10 +27,6 @@ reset_variables() {
     CLONE_BRANCH=""
     BUILD_BRANCH=""
 }
-
-###############################################################################
-# Git Operations
-###############################################################################
 
 git_clone_and_init() {
     local repo_url="$1"

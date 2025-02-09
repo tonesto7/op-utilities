@@ -15,6 +15,10 @@
 readonly BACKUPS_SCRIPT_VERSION="3.0.0"
 readonly BACKUPS_SCRIPT_MODIFIED="2025-02-08"
 
+readonly BACKUP_BASE_DIR="/data/device_backup"
+readonly BACKUP_METADATA_FILE="metadata.json"
+readonly BACKUP_CHECKSUM_FILE="checksum.sha256"
+
 ###############################################################################
 # Backup Operations
 ###############################################################################
