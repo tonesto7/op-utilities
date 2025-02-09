@@ -30,8 +30,8 @@ detect_issues() {
     local usr_ssh_exists=false
     local backup_exists=false
 
-    [ -f "/home/comma/.ssh/github" ] && home_ssh_exists=true
-    [ -f "/usr/default/home/comma/.ssh/github" ] && usr_ssh_exists=true
+    [ -f "$SSH_HOME_DIR/github" ] && home_ssh_exists=true
+    [ -f "$SSH_USR_DEFAULT_DIR/github" ] && usr_ssh_exists=true
     check_ssh_backup && backup_exists=true
 
     # Scenario 1: Missing from both locations
@@ -52,7 +52,7 @@ detect_issues() {
     if [ "$home_ssh_exists" = false ] && [ "$usr_ssh_exists" = true ]; then
         issues_found=$((issues_found + 1))
         ISSUE_FIXES[$issues_found]="repair_create_ssh"
-        ISSUE_DESCRIPTIONS[$issues_found]="SSH keys missing from /home/comma/.ssh/ but available in persistent storage"
+        ISSUE_DESCRIPTIONS[$issues_found]="SSH keys missing from $SSH_HOME_DIR/ but available in persistent storage"
         ISSUE_PRIORITIES[$issues_found]=1
     fi
 
@@ -66,7 +66,7 @@ detect_issues() {
 
     # Permission checks (only if files exist)
     if [ "$home_ssh_exists" = true ]; then
-        check_file_permissions_owner "/home/comma/.ssh/github" "-rw-------" "comma"
+        check_file_permissions_owner "$SSH_HOME_DIR/github" "-rw-------" "comma"
         local home_perm_check=$?
         if [ "$home_perm_check" -eq 1 ]; then
             issues_found=$((issues_found + 1))
@@ -77,7 +77,7 @@ detect_issues() {
     fi
 
     if [ "$usr_ssh_exists" = true ]; then
-        check_file_permissions_owner "/usr/default/home/comma/.ssh/github" "-rw-------" "comma"
+        check_file_permissions_owner "$SSH_USR_DEFAULT_DIR/github" "-rw-------" "comma"
         local usr_perm_check=$?
         if [ "$usr_perm_check" -eq 1 ]; then
             issues_found=$((issues_found + 1))
@@ -96,8 +96,8 @@ detect_issues() {
     fi
 
     # Check for GitHub's host key in known_hosts
-    # if [ -f "/home/comma/.ssh/known_hosts" ]; then
-    #     if ! grep -q "ssh.github.com" "/home/comma/.ssh/known_hosts"; then
+    # if [ -f "$SSH_HOME_DIR/known_hosts" ]; then
+    #     if ! grep -q "ssh.github.com" "$SSH_HOME_DIR/known_hosts"; then
     #         issues_found=$((issues_found + 1))
     #         ISSUE_FIXES[$issues_found]="check_github_known_hosts"
     #         ISSUE_DESCRIPTIONS[$issues_found]="GitHub's host key not found in known_hosts"

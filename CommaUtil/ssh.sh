@@ -11,6 +11,10 @@
 readonly SSH_SCRIPT_VERSION="3.0.0"
 readonly SSH_SCRIPT_MODIFIED="2025-02-09"
 
+readonly SSH_HOME_DIR="/home/comma/.ssh"
+readonly SSH_USR_DEFAULT_DIR="/usr/default/home/comma/.ssh"
+readonly SSH_PERSIST_DIR="/persist/comma"
+
 ###############################################################################
 # Global Variables
 ###############################################################################
@@ -24,18 +28,18 @@ backup_ssh() {
     mkdir -p "$SSH_BACKUP_DIR/persist_comma"
 
     # Backup home directory SSH files if they exist
-    if [ -f "/home/comma/.ssh/github" ] &&
-        [ -f "/home/comma/.ssh/github.pub" ] &&
-        [ -f "/home/comma/.ssh/config" ]; then
-        cp "/home/comma/.ssh/github" "$SSH_BACKUP_DIR/.ssh/"
-        cp "/home/comma/.ssh/github.pub" "$SSH_BACKUP_DIR/.ssh/"
-        cp "/home/comma/.ssh/config" "$SSH_BACKUP_DIR/.ssh/"
+    if [ -f "$SSH_HOME_DIR/github" ] &&
+        [ -f "$SSH_HOME_DIR/github.pub" ] &&
+        [ -f "$SSH_HOME_DIR/config" ]; then
+        cp "$SSH_HOME_DIR/github" "$SSH_BACKUP_DIR/.ssh/"
+        cp "$SSH_HOME_DIR/github.pub" "$SSH_BACKUP_DIR/.ssh/"
+        cp "$SSH_HOME_DIR/config" "$SSH_BACKUP_DIR/.ssh/"
         backup_success=true
     fi
 
     # Backup /persist/comma directory if it exists
-    if [ -d "/persist/comma" ]; then
-        cp -R "/persist/comma/." "$SSH_BACKUP_DIR/persist_comma/"
+    if [ -d "$SSH_PERSIST_DIR" ]; then
+        cp -R "$SSH_PERSIST_DIR/." "$SSH_BACKUP_DIR/persist_comma/"
         backup_success=true
     fi
 
@@ -72,20 +76,20 @@ restore_ssh() {
             remove_ssh_contents
 
             # Restore to home directory
-            mkdir -p /home/comma/.ssh
-            cp "$SSH_BACKUP_DIR/.ssh/github" "/home/comma/.ssh/"
-            cp "$SSH_BACKUP_DIR/.ssh/github.pub" "/home/comma/.ssh/"
-            cp "$SSH_BACKUP_DIR/.ssh/config" "/home/comma/.ssh/"
-            sudo chown comma:comma /home/comma/.ssh -R
-            sudo chmod 700 /home/comma/.ssh
-            sudo chmod 600 /home/comma/.ssh/github
+            mkdir -p "$SSH_HOME_DIR"
+            cp "$SSH_BACKUP_DIR/.ssh/github" "$SSH_HOME_DIR/"
+            cp "$SSH_BACKUP_DIR/.ssh/github.pub" "$SSH_HOME_DIR/"
+            cp "$SSH_BACKUP_DIR/.ssh/config" "$SSH_HOME_DIR/"
+            sudo chown comma:comma "$SSH_HOME_DIR" -R
+            sudo chmod 700 "$SSH_HOME_DIR"
+            sudo chmod 600 "$SSH_HOME_DIR/github"
 
             # Restore persist_comma directory if it exists in backup
             if [ -d "$SSH_BACKUP_DIR/persist_comma" ]; then
-                mkdir -p /persist/comma
-                cp -R "$SSH_BACKUP_DIR/persist_comma/." "/persist/comma/"
-                sudo chown comma:comma /persist/comma -R
-                sudo chmod 700 /persist/comma
+                mkdir -p "$SSH_PERSIST_DIR"
+                cp -R "$SSH_BACKUP_DIR/persist_comma/." "$SSH_PERSIST_DIR/"
+                sudo chown comma:comma "$SSH_PERSIST_DIR" -R
+                sudo chmod 700 "$SSH_PERSIST_DIR"
             fi
 
             # Ensure persistent storage is updated
@@ -116,8 +120,8 @@ restart_ssh_agent() {
     eval "$(ssh-agent -s)"
 
     # Add the SSH key if it exists
-    if [ -f "/home/comma/.ssh/github" ]; then
-        ssh-add /home/comma/.ssh/github
+    if [ -f "$SSH_HOME_DIR/github" ]; then
+        ssh-add "$SSH_HOME_DIR/github"
         print_success "SSH agent restarted and key added."
     else
         print_warning "SSH agent restarted but no key found to add."
@@ -158,9 +162,9 @@ get_ssh_backup_metadata() {
 
 display_ssh_status_short() {
     print_info "│ SSH Status:"
-    if [ -f "/home/comma/.ssh/github" ]; then
+    if [ -f "$SSH_HOME_DIR/github" ]; then
         echo "│ ├─ SSH Key: Found in ~/.ssh/"
-        if [ -d "/persist/comma" ]; then
+        if [ -d "$SSH_PERSIST_DIR" ]; then
             echo "│ ├─ Persist: Found in /persist/comma/"
         fi
         if [ -f "$SSH_BACKUP_DIR/.ssh/github" ]; then
@@ -194,13 +198,13 @@ display_ssh_status() {
     fi
 
     # Check main key
-    check_file_permissions_owner "/home/comma/.ssh/github" "$expected_permissions" "$expected_owner"
+    check_file_permissions_owner "$SSH_HOME_DIR/github" "$expected_permissions" "$expected_owner"
     local ssh_check_result=$?
 
     if [ "$ssh_check_result" -eq 0 ]; then
         echo -e "${NC}│${GREEN} SSH key in ~/.ssh/: ✅${NC}"
         local fingerprint
-        fingerprint=$(ssh-keygen -lf /home/comma/.ssh/github 2>/dev/null | awk '{print $2}')
+        fingerprint=$(ssh-keygen -lf "$SSH_HOME_DIR/github" 2>/dev/null | awk '{print $2}')
         if [ -n "$fingerprint" ]; then
             echo -e "│  └─ Fingerprint: $fingerprint"
         fi
@@ -222,8 +226,8 @@ display_ssh_status() {
             if [ "$backup_days" -gt 30 ]; then
                 echo -e "${NC}│${YELLOW}  └─ Warning: Backup is $backup_days days old${NC}"
             fi
-            if [ -f "/home/comma/.ssh/github" ]; then
-                if diff -q "/home/comma/.ssh/github" "$SSH_BACKUP_DIR/github" >/dev/null; then
+            if [ -f "$SSH_HOME_DIR/github" ]; then
+                if diff -q "$SSH_HOME_DIR/github" "$SSH_BACKUP_DIR/github" >/dev/null; then
                     echo -e "│  └─ Backup is current with active SSH files"
                 else
                     echo -e "${NC}│${YELLOW}  └─ Backup differs from active SSH files${NC}"
@@ -240,12 +244,12 @@ display_ssh_status() {
 
 # Create SSH config file
 create_ssh_config() {
-    mkdir -p /home/comma/.ssh
+    mkdir -p "$SSH_HOME_DIR"
     print_info "Creating SSH config file..."
-    cat >/home/comma/.ssh/config <<EOF
+    cat >"$SSH_HOME_DIR/config" <<EOF
 Host github.com
   AddKeysToAgent yes
-  IdentityFile /home/comma/.ssh/github
+  IdentityFile $SSH_HOME_DIR/github
   Hostname ssh.github.com
   Port 443
   User git
@@ -319,7 +323,7 @@ verify_backup_integrity() {
 }
 
 check_ssh_config_completeness() {
-    local config_file="/home/comma/.ssh/config"
+    local config_file="$SSH_HOME_DIR/config"
     if [ ! -f "$config_file" ]; then
         echo "SSH config file is missing."
         return 1
@@ -327,7 +331,7 @@ check_ssh_config_completeness() {
 
     local missing_keys=()
     grep -q "AddKeysToAgent yes" "$config_file" || missing_keys+=("AddKeysToAgent")
-    grep -q "IdentityFile /home/comma/.ssh/github" "$config_file" || missing_keys+=("IdentityFile")
+    grep -q "IdentityFile $SSH_HOME_DIR/github" "$config_file" || missing_keys+=("IdentityFile")
     grep -q "Hostname ssh.github.com" "$config_file" || missing_keys+=("Hostname")
     grep -q "Port 443" "$config_file" || missing_keys+=("Port")
     grep -q "User git" "$config_file" || missing_keys+=("User")
@@ -362,7 +366,7 @@ test_ssh_connection() {
 
     # Create known_hosts directory if it doesn't exist
     # mkdir -p /home/comma/.ssh
-    touch /home/comma/.ssh/known_hosts
+    touch "$SSH_HOME_DIR/known_hosts"
 
     # Use yes to automatically accept the host key and pipe to ssh
     result=$(yes yes | ssh -o StrictHostKeyChecking=accept-new -T git@github.com 2>&1)
@@ -399,11 +403,11 @@ EOF
 }
 
 check_github_known_hosts() {
-    local known_hosts="/home/comma/.ssh/known_hosts"
+    local known_hosts="$SSH_HOME_DIR/known_hosts"
 
     # Create known_hosts if it doesn't exist
     if [ ! -f "$known_hosts" ]; then
-        mkdir -p /home/comma/.ssh
+        mkdir -p "$SSH_HOME_DIR"
         touch "$known_hosts"
         chown comma:comma "$known_hosts"
         chmod 644 "$known_hosts"
@@ -420,10 +424,10 @@ check_github_known_hosts() {
 }
 
 generate_ssh_key() {
-    if [ ! -f /home/comma/.ssh/github ]; then
-        ssh-keygen -t ed25519 -f /home/comma/.ssh/github
+    if [ ! -f "$SSH_HOME_DIR/github" ]; then
+        ssh-keygen -t ed25519 -f "$SSH_HOME_DIR/github"
         print_info "Displaying the SSH public key. Please add it to your GitHub account."
-        cat /home/comma/.ssh/github.pub
+        cat "$SSH_HOME_DIR/github.pub"
         pause_for_user
     else
         print_info "SSH key already exists. Skipping SSH key generation..."
@@ -437,20 +441,17 @@ repair_create_ssh() {
     local needs_permission_fix=false
 
     # Check existence in both locations
-    [ -f "/home/comma/.ssh/github" ] && home_ssh_exists=true
-    [ -f "/usr/default/home/comma/.ssh/github" ] && usr_ssh_exists=true
-
-    # Check/update known_hosts early in the process
-    # check_github_known_hosts
+    [ -f "$SSH_HOME_DIR/github" ] && home_ssh_exists=true
+    [ -f "$SSH_USR_DEFAULT_DIR/github" ] && usr_ssh_exists=true
 
     # If SSH exists in persistent location but not in home
     if [ "$usr_ssh_exists" = true ] && [ "$home_ssh_exists" = false ]; then
         print_info "Restoring SSH key from persistent storage..."
-        mkdir -p /home/comma/.ssh
-        sudo cp /usr/default/home/comma/.ssh/github* /home/comma/.ssh/
-        sudo cp /usr/default/home/comma/.ssh/config /home/comma/.ssh/
-        sudo chown comma:comma /home/comma/.ssh -R
-        sudo chmod 600 /home/comma/.ssh/github
+        mkdir -p "$SSH_HOME_DIR"
+        sudo cp "$SSH_USR_DEFAULT_DIR/github*" "$SSH_HOME_DIR/"
+        sudo cp "$SSH_USR_DEFAULT_DIR/config" "$SSH_HOME_DIR/"
+        sudo chown comma:comma "$SSH_HOME_DIR" -R
+        sudo chmod 600 "$SSH_HOME_DIR/github"
         print_success "SSH files restored from persistent storage"
         return 0
     fi
@@ -475,20 +476,20 @@ repair_create_ssh() {
     fi
 
     # Check and fix permissions if needed
-    check_file_permissions_owner "/home/comma/.ssh/github" "-rw-------" "comma"
+    check_file_permissions_owner "$SSH_HOME_DIR/github" "-rw-------" "comma"
     if [ $? -eq 1 ]; then
         print_info "Fixing SSH permissions..."
-        sudo chmod 600 /home/comma/.ssh/github
-        sudo chown comma:comma /home/comma/.ssh/github
+        sudo chmod 600 "$SSH_HOME_DIR/github"
+        sudo chown comma:comma "$SSH_HOME_DIR/github"
         needs_permission_fix=true
     fi
 
-    if [ -f "/usr/default/home/comma/.ssh/github" ]; then
-        check_file_permissions_owner "/usr/default/home/comma/.ssh/github" "-rw-------" "comma"
+    if [ -f "$SSH_USR_DEFAULT_DIR/github" ]; then
+        check_file_permissions_owner "$SSH_USR_DEFAULT_DIR/github" "-rw-------" "comma"
         if [ $? -eq 1 ]; then
             print_info "Fixing persistent SSH permissions..."
-            sudo chmod 600 /usr/default/home/comma/.ssh/github
-            sudo chown comma:comma /usr/default/home/comma/.ssh/github
+            sudo chmod 600 "$SSH_USR_DEFAULT_DIR/github"
+            sudo chown comma:comma "$SSH_USR_DEFAULT_DIR/github"
             needs_permission_fix=true
         fi
     fi
@@ -503,7 +504,7 @@ repair_create_ssh() {
 
 reset_ssh() {
     clear
-    if [ -f "/home/comma/.ssh/github" ]; then
+    if [ -f "$SSH_HOME_DIR/github" ]; then
         backup_ssh
     fi
     remove_ssh_contents
@@ -522,16 +523,16 @@ copy_ssh_config_and_keys() {
     print_info "Copying SSH config and keys to persistent storage..."
 
     # Copy to /usr/default/home/comma/.ssh/
-    if [ ! -d /usr/default/home/comma/.ssh/ ]; then
-        sudo mkdir -p /usr/default/home/comma/.ssh/
+    if [ ! -d "$SSH_USR_DEFAULT_DIR" ]; then
+        sudo mkdir -p "$SSH_USR_DEFAULT_DIR"
     fi
-    sudo cp /home/comma/.ssh/config /usr/default/home/comma/.ssh/
-    sudo cp /home/comma/.ssh/github* /usr/default/home/comma/.ssh/
+    sudo cp "$SSH_HOME_DIR/config" "$SSH_USR_DEFAULT_DIR/"
+    sudo cp "$SSH_HOME_DIR/github*" "$SSH_USR_DEFAULT_DIR/"
 
     # Set permissions
-    sudo chown comma:comma /usr/default/home/comma/.ssh/ -R
-    sudo chmod 700 /usr/default/home/comma/.ssh/
-    sudo chmod 600 /usr/default/home/comma/.ssh/github
+    sudo chown comma:comma "$SSH_USR_DEFAULT_DIR" -R
+    sudo chmod 700 "$SSH_USR_DEFAULT_DIR"
+    sudo chmod 600 "$SSH_USR_DEFAULT_DIR/github"
 
     # Ensure persist/comma exists with correct permissions
     if [ ! -d /persist/comma ]; then
@@ -544,9 +545,9 @@ copy_ssh_config_and_keys() {
 }
 
 get_ssh_key() {
-    if [ -f /home/comma/.ssh/github.pub ]; then
+    if [ -f "$SSH_HOME_DIR/github.pub" ]; then
         local ssh_key
-        ssh_key=$(cat /home/comma/.ssh/github.pub)
+        ssh_key=$(cat "$SSH_HOME_DIR/github.pub")
         echo "SSH public key"
         echo "─────────────(Copy the text between these lines)─────────────"
         echo -e "${GREEN}$ssh_key${NC}"
@@ -577,13 +578,13 @@ remove_ssh_contents() {
     print_info "Removing SSH folder contents..."
 
     # Remove home .ssh contents
-    rm -rf /home/comma/.ssh/*
+    rm -rf "$SSH_HOME_DIR/*"
 
     # Remove persist/comma contents
-    sudo rm -rf /persist/comma/*
+    sudo rm -rf "$SSH_PERSIST_DIR/*"
 
     # Remove persistent storage .ssh contents
-    sudo rm -rf /usr/default/home/comma/.ssh/*
+    sudo rm -rf "$SSH_USR_DEFAULT_DIR/*"
 
     print_success "SSH contents removed from all locations"
 }
@@ -596,22 +597,22 @@ import_ssh_keys() {
     clear
     print_info "Importing SSH keys..."
 
-    if [ ! -d /home/comma/.ssh ]; then
+    if [ ! -d "$SSH_HOME_DIR" ]; then
         print_info "Creating SSH directory..."
-        mkdir -p /home/comma/.ssh
+        mkdir -p "$SSH_HOME_DIR"
     fi
 
     # Copy key files
-    print_info "Copying Private Key to /home/comma/.ssh/github..."
-    cp "$private_key_file" "/home/comma/.ssh/github_test"
-    print_info "Copying Public Key to /home/comma/.ssh/github_test.pub..."
-    cp "$public_key_file" "/home/comma/.ssh/github.pub_test"
+    print_info "Copying Private Key to $SSH_HOME_DIR/github..."
+    cp "$private_key_file" "$SSH_HOME_DIR/github_test"
+    print_info "Copying Public Key to $SSH_HOME_DIR/github_test.pub..."
+    cp "$public_key_file" "$SSH_HOME_DIR/github.pub_test"
 
     # Set permissions
     print_info "Setting key permissions..."
-    chmod 600 /home/comma/.ssh/github_test
-    chmod 644 /home/comma/.ssh/github.pub_test
-    chown -R comma:comma /home/comma/.ssh
+    chmod 600 "$SSH_HOME_DIR/github_test"
+    chmod 644 "$SSH_HOME_DIR/github.pub_test"
+    chown -R comma:comma "$SSH_HOME_DIR"
 
     # Create SSH config
     create_ssh_config
@@ -633,9 +634,9 @@ import_ssh_keys() {
 
 import_ssh_menu() {
     clear
-    echo "┌───────────────────────────────────────────────┐"
-    echo "│            SSH Transfer Tool Info             │"
-    echo "├───────────────────────────────────────────────┘"
+    echo "┌────────────────────────────────────────────────────────────────┐"
+    echo "│                      SSH Transfer Tool Info                    │"
+    echo "├────────────────────────────────────────────────────────────────┘"
     echo "│ This tool allows you to transfer SSH keys from your computer"
     echo "│ to your comma device automatically."
     echo "│"
@@ -661,7 +662,7 @@ ssh_menu() {
     while true; do
         clear
         display_ssh_status
-        echo "┌───────────────────────────────────────────────┐"
+        echo "┌────────────────────────────────────────────────"
         echo "│"
         echo -e "│ ${GREEN}Available Actions:${NC}"
         echo "│ 1. Repair/Create SSH setup"
@@ -671,7 +672,7 @@ ssh_menu() {
         echo "│ 5. Test SSH connection"
         echo "│ 6. View SSH key"
         echo "│ 7. Change Github SSH port to 443"
-        if [ -f "/home/comma/.ssh/github" ]; then
+        if [ -f "$SSH_HOME_DIR/github" ]; then
             echo "│ B. Backup SSH files"
         fi
         if check_ssh_backup; then
@@ -688,7 +689,7 @@ ssh_menu() {
         6) view_ssh_key ;;
         7) change_github_ssh_port ;;
         [bB])
-            if [ -f "/home/comma/.ssh/github" ]; then
+            if [ -f "$SSH_HOME_DIR/github" ]; then
                 backup_ssh
             fi
             ;;

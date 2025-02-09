@@ -443,13 +443,13 @@ manage_submodules() {
 
     cd "/data/openpilot" || return 1
 
-    echo "Submodule Management:"
-    echo "1. Initialize submodules"
-    echo "2. Update submodules"
-    echo "3. Reset submodules"
-    echo "4. Status check"
-    echo "5. Full reset (initialize, update, and reset)"
-    echo "Q. Cancel"
+    echo "│ Submodule Management:"
+    echo "│ 1. Initialize submodules"
+    echo "│ 2. Update submodules"
+    echo "│ 3. Reset submodules"
+    echo "│ 4. Status check"
+    echo "│ 5. Full reset (initialize, update, and reset)"
+    echo "│ Q. Cancel"
 
     read -p "Enter your choice: " submodule_choice
 
@@ -1022,7 +1022,7 @@ repo_build_and_management_menu() {
         echo "│         Repository Build & Management         │"
         echo "└───────────────────────────────────────────────┘"
         display_git_status
-        echo "┌───────────────────────────────────────────────┐"
+        echo "┌────────────────────────────────────────────────"
         echo "│"
         echo "│ Repository Operations:"
         echo "│ 1. Fetch and pull latest changes"
@@ -1047,7 +1047,7 @@ repo_build_and_management_menu() {
         echo "│ 14. Remove and Re-clone repository"
         echo "│"
         echo "│ Q. Back to Main Menu"
-
+        echo "└────────────────────────────────────────────────"
         read -p "Enter your choice: " choice
         case $choice in
         1) fetch_pull_latest_changes ;;

@@ -108,7 +108,7 @@ restore_boot_and_logo() {
 toggle_boot_logo() {
     # clear
     print_info "Boot Icon and Logo Update/Restore Utility"
-    echo "+-------------------------------------------------+"
+    echo "┌────────────────────────────────────────────────────"
 
     # Check if the original files exist
     if [ ! -f "$BOOT_IMG" ]; then
@@ -164,25 +164,26 @@ display_general_status() {
     local build_time
     agnos_version=$(cat /VERSION 2>/dev/null)
     build_time=$(awk 'NR==2' /BUILD 2>/dev/null)
-    echo "+----------------------------------------------+"
-    echo "|           Other Items                        |"
-    echo "+----------------------------------------------+"
-    echo "- AGNOS: v$agnos_version ($build_time)"
-    echo "+----------------------------------------------+"
+    echo "┌───────────────────────────────────────────────────┐"
+    echo "│                 Other Items                       │"
+    echo "├───────────────────────────────────────────────────┘"
+    echo "│ - AGNOS: v$agnos_version ($build_time)"
+    echo "├────────────────────────────────────────────────────"
 }
 
 display_logs() {
     clear
-    echo "+---------------------------------+"
-    echo "|            Log Files            |"
-    echo "+---------------------------------+"
+    echo "┌────────────────────────────────────────┐"
+    echo "│                Log Files               │"
+    echo "├────────────────────────────────────────┘"
     local log_files
     log_files=(/data/log/*)
     local i
     for i in "${!log_files[@]}"; do
-        echo "$((i + 1)). ${log_files[$i]}"
+        echo "│ $((i + 1)). ${log_files[$i]}"
     done
-    echo "Q. Back to previous menu"
+    echo "│ Q. Back to previous menu"
+    echo "├────────────────────────────────────────┘"
 
     read -p "Enter the number of the log file to view or [Q] to go back: " log_choice
 
@@ -231,9 +232,9 @@ shutdown_device() {
 
 manage_wifi_networks() {
     clear
-    echo "+----------------------------------------------+"
-    echo "|           WiFi Network Management            |"
-    echo "+----------------------------------------------+"
+    echo "┌───────────────────────────────────────────────┐"
+    echo "│            WiFi Network Management            │"
+    echo "├───────────────────────────────────────────────┘"
 
     # Check if nmcli is available
     if ! command -v nmcli >/dev/null 2>&1; then
@@ -243,29 +244,29 @@ manage_wifi_networks() {
     fi
 
     # Show current connection status
-    echo "Current Connection:"
+    echo "│ Current Connection:"
     nmcli -t -f DEVICE,CONNECTION dev status | grep wifi | while IFS=: read -r dev conn; do
         if [ "$conn" != "--" ]; then
-            echo "Connected to: $conn"
+            echo "│ Connected to: $conn"
         else
-            echo "Not connected"
+            echo "│ Not connected"
         fi
     done
-    echo ""
+    echo "│"
 
     # Scan for networks
-    print_info "Scanning for networks..."
+    echo -ne "│ Scanning for networks...\r\033[K"
     nmcli dev wifi rescan
-    echo "Available Networks:"
+    echo "│ Available Networks:"
     nmcli -f SSID,SIGNAL,SECURITY dev wifi list | sort -k2 -nr | head -n 10
 
-    echo ""
-    echo "Options:"
-    echo "1. Connect to network"
-    echo "2. Disconnect current network"
-    echo "3. Enable WiFi"
-    echo "4. Disable WiFi"
-    echo "Q. Back to Device Controls"
+    echo "│"
+    echo "│ Options:"
+    echo "│ 1. Connect to network"
+    echo "│ 2. Disconnect current network"
+    echo "│ 3. Enable WiFi"
+    echo "│ 4. Disable WiFi"
+    echo "│ Q. Back to Device Controls"
 
     read -p "Enter your choice: " wifi_choice
     case $wifi_choice in

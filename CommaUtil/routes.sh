@@ -5,7 +5,7 @@
 # Version: ROUTES_SCRIPT_VERSION="3.0.3"
 # Last Modified: 2025-02-09
 #
-# This script manages device route operations (sync, concatenate, etc.)
+# This script manages device route operations (concatenate, etc.)
 ###############################################################################
 readonly ROUTES_SCRIPT_VERSION="3.0.0"
 readonly ROUTES_SCRIPT_MODIFIED="2025-02-09"
@@ -81,35 +81,6 @@ get_route_duration() {
 get_segment_count() {
     local route_base="$1"
     find "$ROUTES_DIR" -maxdepth 1 -type d -name "${route_base}--*" | wc -l
-}
-
-check_route_status() {
-    local route_count=0
-    local total_size=0
-    local sync_pending=0
-
-    if [ -d "$ROUTES_DIR" ]; then
-        route_count=$(find "$ROUTES_DIR" -maxdepth 1 -type d -name "*--*" | wc -l)
-        total_size=$(du -sh "$ROUTES_DIR" 2>/dev/null | cut -f1)
-
-        # Check for unsynchronized routes
-        if [ -f "$NETWORK_CONFIG" ]; then
-            local route_loc
-            route_loc=$(jq -r '.locations[] | select(.type == "route_sync")' "$NETWORK_CONFIG")
-            if [ -n "$route_loc" ]; then
-                sync_pending=$(find "$ROUTES_DIR" -maxdepth 1 -type d -name "*--*" | while read -r route; do
-                    local route_base
-                    route_base=$(basename "$route" | sed 's/--.*$//')
-                    if ! grep -q "$route_base" "$TRANSFER_STATE_DIR"/*; then
-                        echo "1"
-                        break
-                    fi
-                done)
-            fi
-        fi
-    fi
-
-    echo "Routes: $route_count | Size: $total_size | Pending Sync: $sync_pending"
 }
 
 concat_route_segments() {
@@ -228,17 +199,17 @@ concat_route_menu() {
     mkdir -p "$output_dir"
     while true; do
         clear
-        echo "+----------------------------------------------+"
+        echo "┌──────────────────────────────────────────────┐"
         echo "│            Concatenate Route Files           │"
-        echo "+----------------------------------------------+"
-        echo "Route: $route_base"
-        echo ""
-        echo "Select files to concatenate:"
-        echo "1. RLog files"
-        echo "2. QLog files"
-        echo "3. Video files"
-        echo "4. All files"
-        echo "Q. Back"
+        echo "└──────────────────────────────────────────────┘"
+        echo "│ Route: $route_base"
+        echo "│"
+        echo "│ Select files to concatenate:"
+        echo "│ 1. RLog files"
+        echo "│ 2. QLog files"
+        echo "│ 3. Video files"
+        echo "│ 4. All files"
+        echo "│ Q. Back"
         read -p "Enter your choice: " concat_choice
         case $concat_choice in
         1) concat_route_segments "$route_base" "rlog" "$output_dir" "true" ;;
@@ -261,7 +232,7 @@ concat_route_menu() {
 ###############################################################################
 
 display_routes_table() {
-    echo "+-------------------------------------------------------"
+    echo "┌────────────────────────────────────────────────────"
     echo "│ Gathering Route Statistics..."
     local stats
     stats=$(display_route_stats)
@@ -282,17 +253,17 @@ display_routes_table() {
 
     # Check if no routes were found.
     if [ ${#routes[@]} -eq 0 ]; then
-        echo "+------------------------------------------------------+"
-        echo "│                 No routes available                  │"
-        echo "+------------------------------------------------------+"
+        echo "┌───────────────────────────────────────────────────┐"
+        echo "│                No routes available                │"
+        echo "└───────────────────────────────────────────────────┘"
         return 0
     fi
 
     echo "│ Available Routes (newest first):"
-    echo "+-------------------------------------------------------"
+    echo "├────────────────────────────────────────────────────"
     # Table header
     printf "│%-4s | %-17s | %-8s | %-6s | %-6s |\n" "#" "Date & Time" "Duration" "Segs" "Size"
-    echo "+-------------------------------------------------------"
+    echo "├────────────────────────────────────────────────────"
 
     local count=1
     for route in "${routes[@]}"; do
@@ -317,13 +288,13 @@ display_routes_table() {
         count=$((count + 1))
     done
 
-    echo "+-------------------------------------------------------"
+    echo "┌────────────────────────────────────────────────────"
     echo "│ Legend:"
     echo -e "│ ${GREEN}■${NC} Long trips (>20 segments)"
     echo -e "│ ${BLUE}■${NC} Medium trips (11-20 segments)"
     echo -e "│ ${YELLOW}■${NC} Single segment trips"
     echo -e "│ ${NC}■${NC} Short trips (2-10 segments)"
-    echo "+-------------------------------------------------------"
+    echo "└────────────────────────────────────────────────────"
 }
 
 view_routes_menu() {
@@ -337,20 +308,16 @@ view_routes_menu() {
         echo "│ 1. View route details"
         echo "│ 2. Remove a single route"
         echo "│ 3. Remove ALL routes"
-        echo "│ 4. Sync a single route"
-        echo "│ 5. Sync ALL routes"
-        echo "│ 6. Manage Network Locations"
+        echo "│ 4. Manage Network Locations"
         echo "│ Q. Back to Main Menu"
-        echo "+-------------------------------------------------------"
+        echo "└────────────────────────────────────────────────────"
 
         read -p "Select an option: " choice
         case "$choice" in
         1) view_route_details_interactive ;;
         2) remove_single_route_interactive ;;
         3) remove_all_routes_interactive ;;
-        4) sync_single_route_interactive ;;
-        5) sync_all_routes_interactive ;;
-        6) manage_network_locations_menu ;;
+        4) manage_network_locations_menu ;;
         [qQ]) return ;;
         *)
             print_error "Invalid choice."
@@ -407,52 +374,6 @@ remove_all_routes_interactive() {
 }
 
 ###############################################################################
-# Sync a single route (select route, then select network location)
-sync_single_route_interactive() {
-    clear
-    local route
-    route=$(select_single_route) || return
-    local net_info
-    net_info=$(select_network_location) || return
-    IFS=' ' read -r type json_location <<<"$net_info"
-    # Verify connectivity using the helper
-    if ! verify_network_connectivity "$type" "$json_location"; then
-        print_error "Network location not reachable."
-        pause_for_user
-        return
-    fi
-    transfer_route "$route" "$json_location" "$type"
-    pause_for_user
-}
-
-###############################################################################
-# Bulk sync of all routes.
-sync_all_routes_interactive() {
-    clear
-    local net_info
-    net_info=$(select_network_location) || return
-    IFS=' ' read -r type json_location <<<"$net_info"
-    if ! verify_network_connectivity "$type" "$json_location"; then
-        print_error "Network location not reachable."
-        pause_for_user
-        return
-    fi
-    local routes=()
-    while IFS= read -r dir; do
-        local route_base="${dir##*/}"
-        route_base="${route_base%%--*}"
-        # Avoid duplicates
-        if [[ ! " ${routes[*]} " =~ " ${route_base} " ]]; then
-            routes+=("$route_base")
-        fi
-    done < <(find "$ROUTES_DIR" -maxdepth 1 -type d -name "*--*")
-    for route in "${routes[@]}"; do
-        transfer_route "$route" "$json_location" "$type"
-    done
-    pause_for_user
-}
-
-###############################################################################
 # Route Cache and Viewing Functions
 ###############################################################################
 update_route_cache() {
@@ -498,9 +419,9 @@ select_single_route() {
         return 1
     fi
     {
-        echo "+----------------------------------------------------+"
-        echo "│             Select a Route to Transfer             │"
-        echo "+----------------------------------------------------+"
+        echo "┌───────────────────────────────────────────────────┐"
+        echo "│              Select a Route to Manage             │"
+        echo "├───────────────────────────────────────────────────┘"
         for ((i = 0; i < total_routes; i++)); do
             local route timestamp duration segments size
             route=$(jq -r ".[$i].route" "$cache_file")
@@ -508,9 +429,9 @@ select_single_route() {
             duration=$(jq -r ".[$i].duration" "$cache_file")
             segments=$(jq -r ".[$i].segments" "$cache_file")
             size=$(jq -r ".[$i].size" "$cache_file")
-            echo "$((i + 1))) Route: $route | Date: $timestamp | Duration: $duration | Segments: $segments | Size: $size"
+            echo "│ $((i + 1))) Route: $route | Date: $timestamp | Duration: $duration | Segments: $segments | Size: $size"
         done
-        echo "+----------------------------------------------------+"
+        echo "└────────────────────────────────────────────────────"
     } >&2
     read -p "Enter route number: " route_choice
     if ! [[ "$route_choice" =~ ^[0-9]+$ ]]; then
@@ -603,25 +524,25 @@ view_route_details() {
     size=$(echo "$route_detail" | jq -r .size)
     while true; do
         clear
-        echo "+----------------------------------------------+"
+        echo "┌──────────────────────────────────────────────┐"
         echo "│                Route Details                 │"
-        echo "+----------------------------------------------+"
-        echo "Route ID: $route_base"
-        echo "Date/Time: $timestamp"
-        echo "Duration: $duration"
-        echo "Segments: $segments"
-        echo "Total Size: $size"
-        echo "------------------------------------------------"
-        echo ""
-        echo "Available Options:"
-        echo "1. View RLog (all segments)"
-        echo "2. View RLog by segment"
-        echo "3. View Errors/Warnings only"
-        echo "4. Play Video"
-        echo "5. Concatenate Route Files"
-        echo "6. Transfer Route"
-        echo "Q. Back"
-        echo "+----------------------------------------------+"
+        echo "├──────────────────────────────────────────────┘"
+        echo "│ Route ID: $route_base"
+        echo "│ Date/Time: $timestamp"
+        echo "│ Duration: $duration"
+        echo "│ Segments: $segments"
+        echo "│ Total Size: $size"
+        echo "├───────────────────────────────────────────────"
+        echo "│"
+        echo "│ Available Options:"
+        echo "│ 1. View RLog (all segments)"
+        echo "│ 2. View RLog by segment"
+        echo "│ 3. View Errors/Warnings only"
+        echo "│ 4. Play Video"
+        echo "│ 5. Concatenate Route Files"
+        echo "│ 6. Transfer Route"
+        echo "│ Q. Back"
+        echo "└───────────────────────────────────────────────"
         read -p "Make a selection: " choice
         case $choice in
         1) view_complete_rlog "$route_base" ;;
@@ -649,5 +570,5 @@ display_route_stats() {
     total_size=$(numfmt --to=iec-i --suffix=B "$total_size_bytes")
     echo "│ Routes: $total_routes | Segments: $total_segments"
     echo "│ Total Size: $total_size"
-    echo "+------------------------------------------------------+"
+    echo "└────────────────────────────────────────────────────"
 }
