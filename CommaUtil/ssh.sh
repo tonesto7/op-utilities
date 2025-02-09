@@ -8,7 +8,7 @@
 # This script manages device SSH operations (SSH key management, configuration,
 # and testing).
 ###############################################################################
-readonly SSH_SCRIPT_VERSION="3.0.0"
+readonly SSH_SCRIPT_VERSION="3.0.1"
 readonly SSH_SCRIPT_MODIFIED="2025-02-09"
 
 readonly SSH_HOME_DIR="/home/comma/.ssh"
@@ -51,6 +51,26 @@ backup_ssh() {
         sudo chmod 700 "$SSH_BACKUP_DIR/persist_comma"
 
         save_ssh_backup_metadata
+
+        # Check for preferred network location
+        local preferred_location_id
+        preferred_location_id=$(get_preferred_ssh_location "ssh_backup")
+
+        if [ -n "$preferred_location_id" ]; then
+            local location_label
+            location_label=$(get_location_label "$preferred_location_id")
+
+            read -p "Would you like to sync this backup to $location_label? (Y/n): " sync_choice
+            if [[ ! "$sync_choice" =~ ^[Nn]$ ]]; then
+                backup_ssh_to_network "$preferred_location_id"
+            else
+                read -p "Would you like to change your preferred network location? (y/N): " change_choice
+                if [[ "$change_choice" =~ ^[Yy]$ ]]; then
+                    configure_preferred_ssh_backup_location
+                fi
+            fi
+        fi
+
         print_success "SSH files backed up successfully to $SSH_BACKUP_DIR/"
     else
         print_warning "No valid SSH files found to backup."
@@ -182,19 +202,39 @@ display_ssh_status_short() {
         echo -e "│ ├─ Persist: ${RED}Missing from persistent storage${NC}"
     fi
 
-    # Check backup status
-    if [ -f "$SSH_BACKUP_DIR/.ssh/github" ] && [ -f "$SSH_BACKUP_DIR/.ssh/github.pub" ] && [ -f "$SSH_BACKUP_DIR/persist_comma/id_rsa" ] && [ -f "$SSH_BACKUP_DIR/persist_comma/id_rsa.pub" ]; then
+    # Check local backup status
+    if [ -f "$SSH_BACKUP_DIR/.ssh/github" ] && [ -f "$SSH_BACKUP_DIR/.ssh/github.pub" ]; then
         backup_complete=true
         local last_backup
         last_backup=$(grep "Backup Date:" "$SSH_BACKUP_DIR/metadata.txt" 2>/dev/null | cut -d: -f2- | xargs)
         if [ -n "$last_backup" ]; then
             local time_ago=$(format_time_ago "$last_backup")
-            echo "│ └─ Backup: Last backup ($time_ago ago)"
-        else
-            echo -e "│ └─ Backup: ${YELLOW}Backup exists but metadata missing${NC}"
+            echo "│ ├─ Local Backup: Last backup ($time_ago ago)"
         fi
     else
-        echo -e "│ └─ Backup: ${RED}Incomplete or missing${NC}"
+        echo -e "│ ├─ Local Backup: ${RED}Not found${NC}"
+    fi
+
+    # Check network backup status
+    preferred_location_id=$(get_preferred_ssh_location "ssh_backup")
+    if [ -n "$preferred_location_id" ]; then
+        local location_label
+        location_label=$(get_location_label "$preferred_location_id")
+        if check_network_ssh_backup_exists "$preferred_location_id"; then
+            network_backup_exists=true
+            local network_backup_date
+            network_backup_date=$(get_network_ssh_backup_date "$preferred_location_id")
+            if [ -n "$network_backup_date" ]; then
+                local network_time_ago=$(format_time_ago "$network_backup_date")
+                echo "│ └─ Network Backup: Last sync ($network_time_ago ago) to $location_label"
+            else
+                echo "│ └─ Network Backup: Synced to $location_label"
+            fi
+        else
+            echo -e "│ └─ Network Backup: ${YELLOW}Not synced to $location_label${NC}"
+        fi
+    else
+        echo -e "│ └─ Network Backup: ${YELLOW}No preferred location configured${NC}"
     fi
 
     # Add issue to the global issues array if problems found
@@ -203,7 +243,18 @@ display_ssh_status_short() {
         ISSUE_DESCRIPTIONS[$issue_index]="SSH configuration needs attention"
         ISSUE_FIXES[$issue_index]="repair_create_ssh"
         ISSUE_PRIORITIES[$issue_index]=1
+    elif [ "$backup_complete" = false ]; then
+        local issue_index=${#ISSUE_DESCRIPTIONS[@]}
+        ISSUE_DESCRIPTIONS[$issue_index]="SSH backup recommended"
+        ISSUE_FIXES[$issue_index]="backup_ssh"
+        ISSUE_PRIORITIES[$issue_index]=3
+    elif [ "$network_backup_exists" = false ] && [ -n "$preferred_location_id" ]; then
+        local issue_index=${#ISSUE_DESCRIPTIONS[@]}
+        ISSUE_DESCRIPTIONS[$issue_index]="Network backup sync recommended"
+        ISSUE_FIXES[$issue_index]="backup_ssh_to_network"
+        ISSUE_PRIORITIES[$issue_index]=3
     fi
+
 }
 
 display_ssh_status() {
@@ -791,6 +842,20 @@ ssh_menu() {
     while true; do
         clear
         display_ssh_status
+
+        # Check various states
+        local has_local_backup=false
+        local has_network_location=false
+        local has_network_backup=false
+        local preferred_location_id
+
+        check_ssh_backup && has_local_backup=true
+        verify_network_config && has_network_location=true
+        preferred_location_id=$(get_preferred_ssh_location "ssh_backup")
+        if [ -n "$preferred_location_id" ] && check_network_ssh_backup_exists "$preferred_location_id"; then
+            has_network_backup=true
+        fi
+
         echo "├────────────────────────────────────────────────────"
         echo "│"
         echo -e "│ ${GREEN}Available Actions:${NC}"
@@ -801,15 +866,48 @@ ssh_menu() {
         echo "│ 5. Test SSH connection"
         echo "│ 6. View SSH key"
         echo "│ 7. Change Github SSH port to 443"
+        echo "│"
+        echo "│ Backup/Restore Options:"
 
-        if check_ssh_backup; then
-            echo "│ B. Backup SSH files"
+        local option_count=7
+        local backup_option_start=$option_count
+
+        # Show backup options based on state
+        if [ "$has_local_backup" = true ]; then
+            option_count=$((option_count + 1))
+            echo "│ $option_count. Backup SSH files locally (Update existing)"
+            option_count=$((option_count + 1))
+            echo "│ $option_count. Restore SSH files from local backup"
+
+            if [ "$has_network_location" = true ]; then
+                if [ "$has_network_backup" = true ]; then
+                    option_count=$((option_count + 1))
+                    echo "│ $option_count. Sync local backup to network"
+                    option_count=$((option_count + 1))
+                    echo "│ $option_count. Restore from network backup"
+                else
+                    option_count=$((option_count + 1))
+                    echo "│ $option_count. Sync local backup to network (Initial sync)"
+                fi
+                option_count=$((option_count + 1))
+                echo "│ $option_count. Configure preferred backup location"
+            else
+                option_count=$((option_count + 1))
+                echo "│ $option_count. Configure network backup"
+            fi
+        else
+            option_count=$((option_count + 1))
+            echo "│ $option_count. Create local SSH backup"
+            if [ "$has_network_location" = true ] && [ "$has_network_backup" = true ]; then
+                option_count=$((option_count + 1))
+                echo "│ $option_count. Restore from network backup"
+            fi
         fi
-        if check_ssh_backup; then
-            echo "│ X. Restore SSH files from backup"
-        fi
+
+        echo "│"
         echo "│ Q. Back to Main Menu"
         echo "└────────────────────────────────────────────────────"
+
         read -p "Enter your choice: " choice
         case $choice in
         1) repair_create_ssh ;;
@@ -819,18 +917,16 @@ ssh_menu() {
         5) test_ssh_connection ;;
         6) view_ssh_key ;;
         7) change_github_ssh_port ;;
-        [bB])
-            if [ -f "$SSH_HOME_DIR/github" ]; then
-                backup_ssh
+        *)
+            if [ "$choice" -gt 7 ] && [ "$choice" -le "$option_count" ]; then
+                local relative_choice=$((choice - backup_option_start))
+                handle_ssh_backup_menu_choice "$relative_choice" "$has_local_backup" "$has_network_location" "$has_network_backup"
+            elif [[ "$choice" =~ ^[qQ]$ ]]; then
+                break
+            else
+                print_error "Invalid choice."
             fi
             ;;
-        [xX])
-            if check_ssh_backup; then
-                restore_ssh
-            fi
-            ;;
-        [qQ]) break ;;
-        *) print_error "Invalid choice." ;;
         esac
     done
 }

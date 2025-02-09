@@ -10,7 +10,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly SCRIPT_VERSION="3.0.0"
+readonly SCRIPT_VERSION="3.0.1"
 readonly SCRIPT_MODIFIED="2025-02-08"
 readonly SCRIPT_BRANCH="test"
 
@@ -69,7 +69,7 @@ readonly CONFIG_DIR="/data/commautil"
 readonly NETWORK_CONFIG="$CONFIG_DIR/network_locations.json"
 readonly CREDENTIALS_DIR="$CONFIG_DIR/credentials"
 readonly TRANSFER_STATE_DIR="$CONFIG_DIR/transfer_state"
-readonly LAUNCH_ENV="/data/openpilot/launch_env.sh"
+readonly LAUNCH_ENV_FILE="/data/openpilot/launch_env.sh"
 
 # Backup Variables
 readonly SSH_BACKUP_DIR="$CONFIG_DIR/backups/ssh"
@@ -79,7 +79,7 @@ readonly SSH_BACKUP_DIR="$CONFIG_DIR/backups/ssh"
 
 # Module Directory and Modules
 readonly MODULE_DIR="$CONFIG_DIR/modules"
-readonly MODULES=("backups.sh" "device.sh" "issues.sh" "network.sh" "repo.sh" "routes.sh" "ssh.sh" "storage.sh" "transfers.sh" "utils.sh")
+readonly MODULES=("backups.sh" "device.sh" "issues.sh" "jobs.sh" "network.sh" "repo.sh" "routes.sh" "ssh.sh" "storage.sh" "transfers.sh" "utils.sh")
 
 ###############################################################################
 # Main Menu

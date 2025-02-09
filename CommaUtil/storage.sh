@@ -7,7 +7,7 @@
 #
 # This script manages device storage operations (disk space, filesystem, etc.)
 ###############################################################################
-readonly STORAGE_SCRIPT_VERSION="3.0.0"
+readonly STORAGE_SCRIPT_VERSION="3.0.1"
 readonly STORAGE_SCRIPT_MODIFIED="2025-02-09"
 
 ###############################################################################

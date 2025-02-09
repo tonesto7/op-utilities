@@ -7,7 +7,7 @@
 #
 # This script detects and resolves issues on the device.
 ###############################################################################
-readonly ISSUES_SCRIPT_VERSION="3.0.0"
+readonly ISSUES_SCRIPT_VERSION="3.0.1"
 readonly ISSUES_SCRIPT_MODIFIED="2025-02-09"
 
 # Array-based detection data

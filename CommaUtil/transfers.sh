@@ -7,5 +7,5 @@
 #
 # This script manages device transfer and sync operations (SMB, SSH, etc.)
 ###############################################################################
-readonly TRANSFERS_SCRIPT_VERSION="3.0.0"
+readonly TRANSFERS_SCRIPT_VERSION="3.0.1"
 readonly TRANSFERS_SCRIPT_MODIFIED="2025-02-09"
