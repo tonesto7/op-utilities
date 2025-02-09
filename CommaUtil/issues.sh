@@ -7,7 +7,7 @@
 #
 # This script detects and resolves issues on the device.
 ###############################################################################
-readonly ISSUES_SCRIPT_VERSION="3.0.3"
+readonly ISSUES_SCRIPT_VERSION="3.0.0"
 readonly ISSUES_SCRIPT_MODIFIED="2025-02-09"
 
 # Array-based detection data
@@ -25,76 +25,106 @@ detect_issues() {
     ISSUE_PRIORITIES=() # 1=Critical, 2=Warning, 3=Recommendation
     local issues_found=0
 
-    # Check if device backup exists
-    local device_id=$(get_device_id)
-    local has_backup=false
-    local backup_age_days=0
+    # SSH Status Checks
+    local home_ssh_exists=false
+    local usr_ssh_exists=false
+    local backup_exists=false
 
-    # Find most recent backup
-    local latest_backup
-    latest_backup=$(find "$BACKUP_BASE_DIR" -mindepth 1 -maxdepth 1 -type d -exec stat -c "%Y %n" {} \; | sort -nr | head -n1 | cut -d' ' -f2)
+    [ -f "/home/comma/.ssh/github" ] && home_ssh_exists=true
+    [ -f "/usr/default/home/comma/.ssh/github" ] && usr_ssh_exists=true
+    check_ssh_backup && backup_exists=true
 
-    if [ -n "$latest_backup" ] && [ -f "${latest_backup}/${BACKUP_METADATA_FILE}" ]; then
-        has_backup=true
-        # Try to get timestamp from metadata, fall back to directory stat if fails
-        local backup_timestamp
-        if backup_timestamp=$(jq -r '.timestamp // empty' "${latest_backup}/${BACKUP_METADATA_FILE}" 2>/dev/null) &&
-            [ -n "$backup_timestamp" ] && [ "$backup_timestamp" != "null" ]; then
-            backup_age_days=$((($(date +%s) - $(date -d "$backup_timestamp" +%s)) / 86400))
-        else
-            backup_timestamp=$(stat -c %Y "$latest_backup")
-            backup_age_days=$((($(date +%s) - backup_timestamp) / 86400))
-        fi
-    fi
-
-    # Check SSH files status - unified SSH check logic
-    if [ ! -f "/home/comma/.ssh/github" ] || [ ! -d "/persist/comma" ]; then
-        if [ -n "$latest_backup" ] && [ -d "${latest_backup}/ssh" ] && [ -f "${latest_backup}/ssh/backup.tar.gz" ]; then
-            issues_found=$((issues_found + 1))
-            ISSUE_FIXES[$issues_found]="restore_backup_component ssh"
-            ISSUE_DESCRIPTIONS[$issues_found]="SSH files missing - Restore from backup?"
+    # Scenario 1: Missing from both locations
+    if [ "$home_ssh_exists" = false ] && [ "$usr_ssh_exists" = false ]; then
+        issues_found=$((issues_found + 1))
+        if [ "$backup_exists" = true ]; then
+            ISSUE_FIXES[$issues_found]="restore_ssh"
+            ISSUE_DESCRIPTIONS[$issues_found]="SSH keys missing from all locations - Backup available for restore"
             ISSUE_PRIORITIES[$issues_found]=1
         else
-            issues_found=$((issues_found + 1))
             ISSUE_FIXES[$issues_found]="repair_create_ssh"
-            ISSUE_DESCRIPTIONS[$issues_found]="SSH files missing - New setup required"
+            ISSUE_DESCRIPTIONS[$issues_found]="SSH keys missing from all locations - New setup required"
             ISSUE_PRIORITIES[$issues_found]=1
         fi
     fi
 
-    # Check persistent storage
-    if [ -f "/home/comma/.ssh/github" ] && [ ! -f "/usr/default/home/comma/.ssh/github" ]; then
+    # Scenario 2: Missing from home but exists in persistent storage
+    if [ "$home_ssh_exists" = false ] && [ "$usr_ssh_exists" = true ]; then
+        issues_found=$((issues_found + 1))
+        ISSUE_FIXES[$issues_found]="repair_create_ssh"
+        ISSUE_DESCRIPTIONS[$issues_found]="SSH keys missing from /home/comma/.ssh/ but available in persistent storage"
+        ISSUE_PRIORITIES[$issues_found]=1
+    fi
+
+    # Scenario 3: Missing from persistent but exists in home
+    if [ "$home_ssh_exists" = true ] && [ "$usr_ssh_exists" = false ]; then
         issues_found=$((issues_found + 1))
         ISSUE_FIXES[$issues_found]="copy_ssh_config_and_keys"
         ISSUE_DESCRIPTIONS[$issues_found]="SSH keys not synchronized to persistent storage"
         ISSUE_PRIORITIES[$issues_found]=2
     fi
 
-    # Check device backup status
-    if [ "$has_backup" = false ]; then
+    # Permission checks (only if files exist)
+    if [ "$home_ssh_exists" = true ]; then
+        check_file_permissions_owner "/home/comma/.ssh/github" "-rw-------" "comma"
+        local home_perm_check=$?
+        if [ "$home_perm_check" -eq 1 ]; then
+            issues_found=$((issues_found + 1))
+            ISSUE_FIXES[$issues_found]="repair_create_ssh"
+            ISSUE_DESCRIPTIONS[$issues_found]="SSH key permissions/ownership incorrect in home directory"
+            ISSUE_PRIORITIES[$issues_found]=2
+        fi
+    fi
+
+    if [ "$usr_ssh_exists" = true ]; then
+        check_file_permissions_owner "/usr/default/home/comma/.ssh/github" "-rw-------" "comma"
+        local usr_perm_check=$?
+        if [ "$usr_perm_check" -eq 1 ]; then
+            issues_found=$((issues_found + 1))
+            ISSUE_FIXES[$issues_found]="repair_create_ssh"
+            ISSUE_DESCRIPTIONS[$issues_found]="SSH key permissions/ownership incorrect in persistent storage"
+            ISSUE_PRIORITIES[$issues_found]=2
+        fi
+    fi
+
+    # Backup recommendations
+    if [ "$home_ssh_exists" = true ] && [ "$backup_exists" = false ]; then
         issues_found=$((issues_found + 1))
-        ISSUE_FIXES[$issues_found]="backup_device"
-        ISSUE_DESCRIPTIONS[$issues_found]="No device backup found"
-        ISSUE_PRIORITIES[$issues_found]=2
-    elif [ "$backup_age_days" -gt 30 ]; then
-        issues_found=$((issues_found + 1))
-        ISSUE_FIXES[$issues_found]="backup_device"
-        ISSUE_DESCRIPTIONS[$issues_found]="Device backup is $backup_age_days days old"
+        ISSUE_FIXES[$issues_found]="backup_ssh"
+        ISSUE_DESCRIPTIONS[$issues_found]="No SSH backup found - Backup recommended"
         ISSUE_PRIORITIES[$issues_found]=3
     fi
 
-    # Check for old backup format
-    if [ -d "/data/ssh_backup" ] && [ -f "/data/ssh_backup/metadata.txt" ]; then
-        if [ "$has_backup" = false ]; then
-            issues_found=$((issues_found + 1))
-            ISSUE_FIXES[$issues_found]="migrate_legacy_backup"
-            ISSUE_DESCRIPTIONS[$issues_found]="Legacy backup detected - migration"
-            ISSUE_PRIORITIES[$issues_found]=2
-        else
-            issues_found=$((issues_found + 1))
-            ISSUE_FIXES[$issues_found]="remove_legacy_backup"
-            ISSUE_DESCRIPTIONS[$issues_found]="Legacy backup detected - removal"
-            ISSUE_PRIORITIES[$issues_found]=3
+    # Check for GitHub's host key in known_hosts
+    # if [ -f "/home/comma/.ssh/known_hosts" ]; then
+    #     if ! grep -q "ssh.github.com" "/home/comma/.ssh/known_hosts"; then
+    #         issues_found=$((issues_found + 1))
+    #         ISSUE_FIXES[$issues_found]="check_github_known_hosts"
+    #         ISSUE_DESCRIPTIONS[$issues_found]="GitHub's host key not found in known_hosts"
+    #         ISSUE_PRIORITIES[$issues_found]=2
+    #     fi
+    # else
+    #     issues_found=$((issues_found + 1))
+    #     ISSUE_FIXES[$issues_found]="check_github_known_hosts"
+    #     ISSUE_DESCRIPTIONS[$issues_found]="SSH known_hosts file missing"
+    #     ISSUE_PRIORITIES[$issues_found]=2
+    # fi
+
+    # Check backup age if it exists
+    if [ "$backup_exists" = true ] && [ -f "/data/ssh_backup/metadata.txt" ]; then
+        local backup_date
+        backup_date=$(grep "Backup Date:" /data/ssh_backup/metadata.txt | cut -d: -f2- | xargs)
+        if [ -n "$backup_date" ]; then
+            local backup_age
+            local backup_days
+            backup_age=$(($(date +%s) - $(date -d "$backup_date" +%s)))
+            backup_days=$((backup_age / 86400))
+            if [ "$backup_days" -gt 30 ]; then
+                issues_found=$((issues_found + 1))
+                ISSUE_FIXES[$issues_found]="backup_ssh"
+                ISSUE_DESCRIPTIONS[$issues_found]="SSH backup is $backup_days days old - Consider updating"
+                ISSUE_PRIORITIES[$issues_found]=3
+            fi
         fi
     fi
 }

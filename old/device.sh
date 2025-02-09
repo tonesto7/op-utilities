@@ -7,156 +7,32 @@
 #
 # This script manages device status, controls, and statistics.
 ###############################################################################
-readonly DEVICE_SCRIPT_VERSION="3.0.0"
+readonly DEVICE_SCRIPT_VERSION="3.0.3"
 readonly DEVICE_SCRIPT_MODIFIED="2025-02-09"
-
-###############################################################################
-# Boot & Logo Update Functions
-###############################################################################
-
-# Define paths:
-readonly BOOT_IMG="/usr/comma/bg.jpg"
-readonly LOGO_IMG="/data/openpilot/selfdrive/assets/img_spinner_comma.png"
-
-readonly BLUEPILOT_BOOT_IMG="/data/openpilot/selfdrive/assets/img_bluepilot_boot.jpg"
-readonly BLUEPILOT_LOGO_IMG="/data/openpilot/selfdrive/assets/img_bluepilot_logo.png"
-
-readonly BOOT_IMG_BKP="${BOOT_IMG}.backup"
-readonly LOGO_IMG_BKP="${LOGO_IMG}.backup"
-
-mount_rw_boot_logo() {
-    print_info "Mounting / partition as read-write for boot image update..."
-    sudo mount -o remount,rw /
-}
-
-update_boot_and_logo() {
-    mount_rw_boot_logo
-
-    # Ensure the original files exist before proceeding
-    if [ ! -f "$BOOT_IMG" ]; then
-        print_error "Boot image ($BOOT_IMG) does not exist. Aborting update."
-        pause_for_user
-        return 1
-    fi
-    if [ ! -f "$LOGO_IMG" ]; then
-        print_error "Logo image ($LOGO_IMG) does not exist. Aborting update."
-        pause_for_user
-        return 1
-    fi
-
-    # Create backups if they do not already exist
-    if [ ! -f "$BOOT_IMG_BKP" ]; then
-        sudo cp "$BOOT_IMG" "$BOOT_IMG_BKP"
-        print_success "Backup created for boot image at $BOOT_IMG_BKP"
-    else
-        print_info "Backup for boot image already exists at $BOOT_IMG_BKP"
-    fi
-
-    if [ ! -f "$LOGO_IMG_BKP" ]; then
-        sudo cp "$LOGO_IMG" "$LOGO_IMG_BKP"
-        print_success "Backup created for logo image at $LOGO_IMG_BKP"
-    else
-        print_info "Backup for logo image already exists at $LOGO_IMG_BKP"
-    fi
-
-    # Ensure the BluePilot images exist
-    if [ ! -f "$BLUEPILOT_BOOT_IMG" ]; then
-        print_error "BluePilot boot image ($BLUEPILOT_BOOT_IMG) not found."
-        pause_for_user
-        return 1
-    fi
-    if [ ! -f "$BLUEPILOT_LOGO_IMG" ]; then
-        print_error "BluePilot logo image ($BLUEPILOT_LOGO_IMG) not found."
-        pause_for_user
-        return 1
-    fi
-
-    # Overwrite the original files with the BluePilot images
-    sudo cp "$BLUEPILOT_BOOT_IMG" "$BOOT_IMG"
-    sudo cp "$BLUEPILOT_LOGO_IMG" "$LOGO_IMG"
-    print_success "Boot and logo images updated with BluePilot files."
-    pause_for_user
-}
-
-restore_boot_and_logo() {
-    mount_rw_boot_logo
-
-    # Check if backups exist before attempting restoration
-    if [ ! -f "$BOOT_IMG_BKP" ]; then
-        print_error "Backup for boot image not found at $BOOT_IMG_BKP"
-        pause_for_user
-        return 1
-    fi
-    if [ ! -f "$LOGO_IMG_BKP" ]; then
-        print_error "Backup for logo image not found at $LOGO_IMG_BKP"
-        pause_for_user
-        return 1
-    fi
-
-    # Restore backups to the original file locations
-    sudo cp "$BOOT_IMG_BKP" "$BOOT_IMG"
-    sudo cp "$LOGO_IMG_BKP" "$LOGO_IMG"
-
-    # Remove the backups
-    sudo rm -f "$BOOT_IMG_BKP"
-    sudo rm -f "$LOGO_IMG_BKP"
-
-    print_success "Boot and logo images restored from backup."
-    pause_for_user
-}
-
-toggle_boot_logo() {
-    # clear
-    print_info "Boot Icon and Logo Update/Restore Utility"
-    echo "+-------------------------------------------------+"
-
-    # Check if the original files exist
-    if [ ! -f "$BOOT_IMG" ]; then
-        print_error "Boot image ($BOOT_IMG) is missing; cannot proceed."
-        pause_for_user
-        return 1
-    fi
-    if [ ! -f "$LOGO_IMG" ]; then
-        print_error "Logo image ($LOGO_IMG) is missing; cannot proceed."
-        pause_for_user
-        return 1
-    fi
-
-    # If backup files exist, offer restoration; otherwise, offer update.
-    if [ -f "$BOOT_IMG_BKP" ] && [ -f "$LOGO_IMG_BKP" ]; then
-        echo "Backup files exist."
-        read -p "Do you want to restore the original boot and logo images? (y/N): " answer
-        if [[ "$answer" =~ ^[Yy]$ ]]; then
-            restore_boot_and_logo
-        else
-            print_info "Restore cancelled."
-            pause_for_user
-        fi
-    else
-        echo "No backups found."
-        read -p "Do you want to update boot and logo images with BluePilot files? (y/N): " answer
-        if [[ "$answer" =~ ^[Yy]$ ]]; then
-            update_boot_and_logo
-        else
-            print_info "Update cancelled."
-            pause_for_user
-        fi
-    fi
-}
 
 ###############################################################################
 # System Status & Logs
 ###############################################################################
 
 display_os_info_short() {
-    print_info "| OS Information:"
-    local agnos_version
-    agnos_version=$(cat /VERSION 2>/dev/null)
-    if [ -n "$agnos_version" ]; then
-        echo "| └─ AGNOS: v$agnos_version"
-    else
-        echo "| └─ AGNOS: Unknown"
+    local agnos_version="" build_time=""
+    # Safely read AGNOS version with fallback
+    if [ -f "/VERSION" ]; then
+        agnos_version=$(cat /VERSION 2>/dev/null || echo "Unknown")
+        build_time=$(awk 'NR==2' /BUILD 2>/dev/null || echo "Unknown")
     fi
+
+    print_info "│ System Information:"
+    print_info "│ ├─ AGNOS: ${agnos_version:-Unknown} (${build_time:-Unknown})"
+
+    local hardware_serial dongle_id wifi_mac
+    hardware_serial=$(cat /data/params/d/HardwareSerial 2>/dev/null || echo "Unknown")
+    dongle_id=$(cat /data/params/d/DongleId 2>/dev/null || echo "Unknown")
+    wifi_mac=$(cat /sys/class/net/wlan0/address 2>/dev/null || echo "Unknown")
+
+    print_info "│ ├─ Hardware Serial: ${hardware_serial}"
+    print_info "│ ├─ Panda Dongle ID: ${dongle_id}"
+    print_info "│ └─ WiFi MAC Address: ${wifi_mac}"
 }
 
 display_general_status() {
@@ -165,39 +41,18 @@ display_general_status() {
     agnos_version=$(cat /VERSION 2>/dev/null)
     build_time=$(awk 'NR==2' /BUILD 2>/dev/null)
     echo "+----------------------------------------------+"
-    echo "|           Other Items                        |"
+    echo "│                 Other Items                  │"
     echo "+----------------------------------------------+"
-    echo "- AGNOS: v$agnos_version ($build_time)"
+    echo "│ AGNOS: v$agnos_version ($build_time)"
+    echo "│ Hardware Serial: $(get_device_id)"
+    echo "│ WiFi MAC Address: $(get_wifi_mac)"
+    echo "│ Panda Dongle ID: $(get_dongle_id)"
     echo "+----------------------------------------------+"
 }
 
-display_logs() {
-    clear
-    echo "+---------------------------------+"
-    echo "|            Log Files            |"
-    echo "+---------------------------------+"
-    local log_files
-    log_files=(/data/log/*)
-    local i
-    for i in "${!log_files[@]}"; do
-        echo "$((i + 1)). ${log_files[$i]}"
-    done
-    echo "Q. Back to previous menu"
-
-    read -p "Enter the number of the log file to view or [Q] to go back: " log_choice
-
-    if [[ $log_choice =~ ^[0-9]+$ ]] && ((log_choice > 0 && log_choice <= ${#log_files[@]})); then
-        local log_file="${log_files[$((log_choice - 1))]}"
-        echo "Displaying contents of $log_file:"
-        cat "$log_file"
-    elif [[ $log_choice =~ ^[Qq]$ ]]; then
-        return
-    else
-        print_error "Invalid choice."
-    fi
-
-    pause_for_user
-}
+###############################################################################
+# Device Control Functions
+###############################################################################
 
 view_error_log() {
     print_info "Displaying error log at /data/community/crashes/error.txt:"
@@ -225,14 +80,10 @@ shutdown_device() {
     sudo shutdown now
 }
 
-###############################################################################
-# Device Control Functions
-###############################################################################
-
 manage_wifi_networks() {
     clear
     echo "+----------------------------------------------+"
-    echo "|           WiFi Network Management            |"
+    echo "│           WiFi Network Management            │"
     echo "+----------------------------------------------+"
 
     # Check if nmcli is available
@@ -324,9 +175,9 @@ restart_cellular_radio() {
 
 manage_bluetooth() {
     clear
-    echo "┌───────────────────────────────────────────────┐"
-    echo "│              Bluetooth Management             │"
-    echo "├───────────────────────────────────────────────┘"
+    echo "+----------------------------------------------+"
+    echo "│             Bluetooth Management             │"
+    echo "+----------------------------------------------+"
 
     # Check if bluetoothctl is available
     if ! command -v bluetoothctl >/dev/null 2>&1; then
@@ -335,16 +186,16 @@ manage_bluetooth() {
         return 1
     fi
 
-    echo "│ Current Status:"
+    echo "Current Status:"
     bluetoothctl show | grep "Powered:"
 
-    echo "│"
-    echo "│ Options:"
-    echo "│ 1. Turn Bluetooth On"
-    echo "│ 2. Turn Bluetooth Off"
-    echo "│ 3. Show Paired Devices"
-    echo "│ 4. Scan for Devices"
-    echo "│ Q. Back to Device Controls"
+    echo ""
+    echo "Options:"
+    echo "1. Turn Bluetooth On"
+    echo "2. Turn Bluetooth Off"
+    echo "3. Show Paired Devices"
+    echo "4. Scan for Devices"
+    echo "Q. Back to Device Controls"
 
     read -p "Enter your choice: " bt_choice
     case $bt_choice in
@@ -376,15 +227,15 @@ manage_bluetooth() {
 device_controls_menu() {
     while true; do
         clear
-        echo "┌───────────────────────────────────────────────┐"
-        echo "│                 Device Controls               │"
-        echo "├───────────────────────────────────────────────┘"
-        echo "│ 1. WiFi Network Management"
-        echo "│ 2. Restart Cellular Radio"
-        echo "│ 3. Bluetooth Management"
-        echo "│ 4. Turn Screen Off"
-        echo "│ 5. Turn Screen On"
-        echo "│ Q. Back to Main Menu"
+        echo "+----------------------------------------------+"
+        echo "│               Device Controls                │"
+        echo "+----------------------------------------------+"
+        echo "1. WiFi Network Management"
+        echo "2. Restart Cellular Radio"
+        echo "3. Bluetooth Management"
+        echo "4. Turn Screen Off"
+        echo "5. Turn Screen On"
+        echo "Q. Back to Main Menu"
 
         read -p "Enter your choice: " control_choice
         case $control_choice in
@@ -467,46 +318,47 @@ get_cellular_stats() {
 system_statistics_menu() {
     while true; do
         clear
-        echo "┌───────────────────────────────────────────────┐"
-        echo "│               System Statistics               │"
-        echo "├───────────────────────────────────────────────┘"
-        echo "│ CPU Usage:"
-        echo "│ ├─ $(get_cpu_stats)"
-        echo "│ ├─ Top Processes by CPU:"
+        echo "+----------------------------------------------+"
+        echo "│               System Statistics              │"
+        echo "+----------------------------------------------+"
+
+        echo "CPU Usage:"
+        echo "├─ $(get_cpu_stats)"
+        echo "├─ Top Processes by CPU:"
         ps -eo cmd,%cpu --sort=-%cpu | head -4 | tail -3 |
             awk '{printf "│  %-40s %5.1f%%\n", substr($1,1,40), $NF}'
-        echo "│"
+        echo ""
 
-        echo "│ Memory Usage:"
-        echo "│ ├─ $(get_memory_stats)"
-        echo "│ ├─ Memory Details:"
+        echo "Memory Usage:"
+        echo "├─ $(get_memory_stats)"
+        echo "├─ Memory Details:"
         free -h | awk 'NR==2{printf "│  %-8s %8s %8s %8s %8s\n", "", "total", "used", "free", "cache"}'
         free -h | awk 'NR==2{printf "│  %-8s %8s %8s %8s %8s\n", "Mem:", $2, $3, $4, $6}'
         free -h | awk 'NR==3{printf "│  %-8s %8s %8s %8s\n", "Swap:", $2, $3, $4}'
-        echo "│"
+        echo ""
 
-        echo "│ Cellular Connection:"
-        echo "│ ├─ $(get_cellular_stats)"
+        echo "Cellular Connection:"
+        echo "├─ $(get_cellular_stats)"
         if command -v mmcli >/dev/null 2>&1; then
             local modem_index
             modem_index=$(mmcli -L | grep -o '[0-9]*' | head -1)
             if [ -n "$modem_index" ]; then
-                echo "│ ├─ Additional Details:"
+                echo "├─ Additional Details:"
                 mmcli -m "$modem_index" | grep -E "operator name|signal quality|state|access tech|power state|packet service state" |
                     sed 's/^/│  /' | sed 's/|//'
             fi
         fi
-        echo "│"
+        echo ""
 
-        echo "│ Disk Usage:"
-        echo "│ ├─ Filesystem Details:"
+        echo "Disk Usage:"
+        echo "├─ Filesystem Details:"
         df -h | grep -E '^/dev|Filesystem' |
             awk '{printf "│  %-15s %8s %8s %8s %8s\n", substr($1,length($1)>15?length($1)-15:0), $2, $3, $4, $5}'
-        echo "│"
+        echo ""
 
-        echo "├────────────────────────────────────────────────"
-        echo "│ R. Refresh Statistics"
-        echo "│ Q. Back to Main Menu"
+        echo "+----------------------------------------------+"
+        echo "R. Refresh Statistics"
+        echo "Q. Back to Main Menu"
 
         read -t 30 -p "Enter your choice (auto-refresh in 30s): " stats_choice
 

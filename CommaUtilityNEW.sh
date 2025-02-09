@@ -10,8 +10,8 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly SCRIPT_VERSION="3.0.0"
-readonly SCRIPT_MODIFIED="2025-02-08"
+readonly SCRIPT_VERSION="3.0.3"
+readonly SCRIPT_MODIFIED="2025-02-09"
 readonly SCRIPT_BRANCH="test"
 
 # We unify color-coded messages in a single block for consistency:
@@ -36,11 +36,6 @@ print_blue() {
 }
 print_info() {
     echo -e "$1"
-}
-
-# A convenient prompt-pause function to unify "Press Enter" prompts:
-pause_for_user() {
-    read -p "Press enter to continue..."
 }
 
 # OS checks and directories
@@ -73,10 +68,10 @@ readonly LAUNCH_ENV="/data/openpilot/launch_env.sh"
 
 # Module Directory and Modules
 readonly MODULE_DIR="$CONFIG_DIR/modules"
-readonly MODULES=("backups.sh" "device.sh" "issues.sh" "network.sh" "repo.sh" "routes.sh" "ssh.sh" "storage.sh" "transfers.sh" "utils.sh")
+readonly MODULES=("backups.sh" "ssh.sh" "transfers.sh" "comma.sh" "storage.sh" "issues.sh" "routes.sh" "git.sh" "builds.sh" "utils.sh" "device.sh")
 
 ###############################################################################
-# Main Menu
+# Main Menu Functions
 ###############################################################################
 
 display_main_menu() {
@@ -87,6 +82,7 @@ display_main_menu() {
     echo "├────────────────────────────────────────────────────"
 
     display_os_info_short
+    display_backup_status_short
     display_git_status_short
     display_disk_space_status_short
     display_ssh_status_short
@@ -139,17 +135,18 @@ display_main_menu() {
     # Display Main Menu Options
     echo "│"
     echo -e "│${GREEN} Available Actions:${NC}"
-    echo "│ 1. SSH Management"
-    echo "│ 2. Repository & Build Tools"
-    echo "│ 3. View Logs"
-    echo "│ 4. View Recent Error"
-    echo "│ 5. System Statistics"
-    echo "│ 6. Device Controls"
-    echo "│ 7. Modify Boot Icon/Logo"
-    echo "│ 8. Route & Transfer Management"
+    echo "│ 1. SSH Key Management"
+    echo "│ 2. Device Backup"
+    echo "│ 3. Repository & Build Tools"
+    echo "│ 4. View Logs"
+    echo "│ 5. View Recent Error"
+    echo "│ 6. System Statistics"
+    echo "│ 7. Device Controls"
+    echo "│ 8. Modify Boot Icon/Logo"
+    echo "│ 9. Route & Transfer Management"
 
     # Dynamic fix options
-    local fix_number=9 # Start from 6 because we already have 5 options
+    local fix_number=10 # Start from 6 because we already have 5 options
     for i in "${!ISSUE_FIXES[@]}"; do
         local color=""
         case "${ISSUE_PRIORITIES[$i]}" in
@@ -173,16 +170,17 @@ handle_main_menu_input() {
     read -p "Enter your choice: " main_choice
     case $main_choice in
     1) ssh_menu ;;
-    2) repo_build_and_management_menu ;;
-    3) display_logs ;;
-    4) view_error_log ;;
-    5) system_statistics_menu ;;
-    6) device_controls_menu ;;
-    7) toggle_boot_logo ;;
-    8) view_routes_menu ;;
+    2) backup_menu ;;
+    3) repo_build_and_management_menu ;;
+    4) display_logs ;;
+    5) view_error_log ;;
+    6) system_statistics_menu ;;
+    7) device_controls_menu ;;
+    8) toggle_boot_logo ;;
+    9) view_routes_menu ;;
     [0-9] | [0-9][0-9])
         # Calculate array index by adjusting for the 8 standard menu items
-        local fix_index=$((main_choice - 9))
+        local fix_index=$((main_choice - 10))
         # Get all indices of the associative arrays
         local indices=(${!ISSUE_FIXES[@]})
         if [ "$fix_index" -ge 0 ] && [ "$fix_index" -lt "${#indices[@]}" ]; then
@@ -203,7 +201,7 @@ handle_main_menu_input() {
         ;;
     *)
         print_error "Invalid choice."
-        # pause_for_user
+        pause_for_user
         ;;
     esac
 }
@@ -321,6 +319,21 @@ check_prerequisites() {
     local errors=0
     echo -e "│ Checking Prerequisites..."
 
+    # Check required commands
+    for cmd in jq rsync smbclient tar wget; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            echo -ne "│ ${YELLOW}smbclient is not installed${NC} | Installing (might take a moment)...\r\033[K"
+            # Quietly install smbclient
+            sudo apt update && sudo apt install -y "$cmd" >/dev/null 2>&1
+            if ! command -v "$cmd" >/dev/null 2>&1; then
+                echo -e "│ ${RED}Failed to install $cmd${NC}"
+                errors=$((errors + 1))
+            else
+                echo -e "│ ${GREEN}$cmd Installed Successfully${NC}"
+            fi
+        fi
+    done
+
     # Check disk space in /data
     local available_space
     available_space=$(df -m /data | awk 'NR==2 {print $4}')
@@ -341,21 +354,6 @@ check_prerequisites() {
         errors=$((errors + 1))
     fi
 
-    # Check required commands
-    for cmd in jq rsync smbclient tar wget; do
-        if ! command -v "$cmd" >/dev/null 2>&1; then
-            echo -ne "│ ${YELLOW}smbclient is not installed${NC} | Installing (might take a moment)...\r\033[K"
-            # Quietly install smbclient
-            sudo apt update && sudo apt install -y "$cmd" >/dev/null 2>&1
-            if ! command -v "$cmd" >/dev/null 2>&1; then
-                echo -e "│ ${RED}Failed to install $cmd${NC}"
-                errors=$((errors + 1))
-            else
-                echo -e "│ ${GREEN}$cmd Installed Successfully${NC}"
-            fi
-        fi
-    done
-
     if [ $errors -gt 0 ]; then
         echo -e "│ ${YELLOW}Some prerequisites checks failed. Some features may not work correctly.${NC}"
         pause_for_user
@@ -368,7 +366,7 @@ check_prerequisites() {
 }
 
 ###############################################################################
-# Help Menu and Command Line Arguments
+# BluePilot Utility Functions (from build_bluepilot)
 ###############################################################################
 
 show_help() {
@@ -378,82 +376,132 @@ CommaUtility Script (V$SCRIPT_VERSION) - Last Modified: $SCRIPT_MODIFIED
 
 Usage: ./CommaUtility.sh [OPTION] [PARAMETERS]
 
+Device Backup Operations:
+  --backup                      Create device backup
+    --network <location_id>     Network location ID for backup
+    --auto-sync                 Auto-sync to configured locations
+  --restore-device              Restore from device backup
+  --set-backup-location         Configure preferred network backup location
+  --migrate-backup              Migrate from old backup format to new format
+  --fetch-backup <dir>          Fetch backup from network location
+    --network <location_id>     Network location ID to fetch from
+
 SSH Operations:
-  --import-ssh                      Import SSH keys from files
-    --private-key-file <path>       Path to private key file
-    --public-key-file <path>        Path to public key file
-  --test-ssh                        Test SSH connection to GitHub
-  --backup-ssh                      Backup SSH files
-  --restore-ssh                     Restore SSH files from backup
-  --reset-ssh                       Reset SSH configuration
+  --test-ssh                    Test SSH connection to GitHub
+  --reset-ssh                   Reset SSH configuration and create new keys
+  --copy-ssh-persist           Copy SSH config to persistent storage
 
 Build Operations:
-  --build-dev                       Build BluePilot internal dev
-  --build-public                    Build BluePilot public experimental
-  --custom-build                    Perform a custom build
-    --repo <repository>             Select repository (bluepilotdev, sp-dev-c3, sunnypilot, or commaai)
-    --clone-branch <branch>         Branch to clone
-    --build-branch <branch>         Branch name for build
+  --build-dev                   Build BluePilot internal dev
+  --build-public                Build BluePilot public experimental
+  --custom-build                Perform a custom build
+    --repo <repository>         Select repository (bluepilotdev, sp-dev-c3, sunnypilot, or commaai)
+    --clone-branch <branch>     Branch to clone
+    --build-branch <branch>     Branch name for build
 
-Clone Operations:
-  --clone-public-bp                 Clone BluePilot staging branch
-  --clone-internal-dev-build        Clone BluePilot internal dev build
-  --clone-internal-dev              Clone BluePilot internal dev
-  --custom-clone                    Clone a specific repository/branch
-    --repo <repository>             Repository to clone from
-    --clone-branch <branch>         Branch to clone
+Route Operations:
+  --route-sync                  Sync all routes to network location
+    --network <location_id>     Network location ID for sync
+  --sync-single-route <route>   Sync a single route
+    --network <location_id>     Network location ID for sync
+  --view-routes                 View available routes
+
+Network Operations:
+  --manage-locations            Manage network locations
+  --manage-jobs                 Manage auto sync/backup jobs
 
 System Operations:
-  --update                          Update this script to latest version
-  --reboot                          Reboot the device
-  --shutdown                        Shutdown the device
-  --view-logs                       View system logs
+  --update                      Update this script to latest version
+  --reboot                      Reboot the device
+  --shutdown                    Shutdown the device
+  --view-logs                   View system logs
 
 Git Operations:
-  --git-pull                        Fetch and pull latest changes
-  --git-status                      Show Git repository status
-  --git-branch <branch>            Switch to specified branch
+  --git-pull                    Fetch and pull latest changes
+  --git-status                  Show Git repository status
+  --git-branch <branch>         Switch to specified branch
 
 General:
-  -h, --help                        Show this help message
+  -h, --help                    Show this help message
 
 Examples:
-  # SSH operations
-  ./CommaUtility.sh --import-ssh --private-key-file /path/to/key --public-key-file /path/to/key.pub
-  ./CommaUtility.sh --test-ssh
+  # Create device backup
+  ./CommaUtility.sh --backup
+  ./CommaUtility.sh --backup --network <location_id>
+
+  # Restore from backup
+  ./CommaUtility.sh --restore-device
+
+  # Configure backup location
+  ./CommaUtility.sh --set-backup-location
 
   # Build operations
   ./CommaUtility.sh --custom-build --repo bluepilotdev --clone-branch dev --build-branch build
 
-  # Clone operations
-  ./CommaUtility.sh --custom-clone --repo sunnypilot --clone-branch master
+  # Route operations
+  ./CommaUtility.sh --route-sync --network <location_id>
+  ./CommaUtility.sh --sync-single-route <route> --network <location_id>
 
-  # System operations
-  ./CommaUtility.sh --update
-  ./CommaUtility.sh --reboot
-
-  # Git operations
-  ./CommaUtility.sh --git-branch master
+  # Network management
+  ./CommaUtility.sh --manage-locations
+  ./CommaUtility.sh --manage-jobs
 
 Note: When no options are provided, the script will launch in interactive menu mode.
 EOL
 }
+
+###############################################################################
 # Parse Command Line Arguments
+###############################################################################
 parse_arguments() {
     while [ $# -gt 0 ]; do
         case "$1" in
-        --import-ssh)
-            SCRIPT_ACTION="import-ssh"
+        # Backup operations
+        --backup)
+            SCRIPT_ACTION="backup"
             shift
             ;;
-        --private-key-file)
-            PRIVATE_KEY_FILE="$2"
+        --network)
+            NETWORK_ID="$2"
             shift 2
             ;;
-        --public-key-file)
-            PUBLIC_KEY_FILE="$2"
-            shift 2
+        --auto-sync)
+            AUTO_SYNC="true"
+            shift
             ;;
+        --restore-device)
+            SCRIPT_ACTION="restore_device"
+            shift
+            ;;
+        --migrate-backup)
+            SCRIPT_ACTION="migrate_backup"
+            shift
+            ;;
+
+        # SSH operations
+        --test-ssh)
+            SCRIPT_ACTION="test_ssh"
+            shift
+            ;;
+        --reset-ssh)
+            SCRIPT_ACTION="reset_ssh"
+            shift
+            ;;
+        --copy-ssh-persist)
+            SCRIPT_ACTION="copy_ssh_persist"
+            shift
+            ;;
+
+        # Network management
+        --manage-locations)
+            SCRIPT_ACTION="manage_locations"
+            shift
+            ;;
+        --manage-jobs)
+            SCRIPT_ACTION="manage_jobs"
+            shift
+            ;;
+
         # Build operations
         --build-dev)
             SCRIPT_ACTION="build-dev"
@@ -479,23 +527,27 @@ parse_arguments() {
             BUILD_BRANCH="$2"
             shift 2
             ;;
-        # Clone operations
-        --clone-public-bp)
-            SCRIPT_ACTION="clone-public-bp"
+
+        # Route operations
+        --route-sync)
+            SCRIPT_ACTION="route_sync"
             shift
             ;;
-        --clone-internal-dev-build)
-            SCRIPT_ACTION="clone-internal-dev-build"
+        --sync-single-route)
+            SCRIPT_ACTION="sync_single_route"
+            ROUTE_BASE="$2"
+            shift 2
+            ;;
+        --view-routes)
+            SCRIPT_ACTION="view_routes"
             shift
             ;;
-        --clone-internal-dev)
-            SCRIPT_ACTION="clone-internal-dev"
-            shift
+        --cleanup-routes)
+            SCRIPT_ACTION="cleanup_routes"
+            CLEANUP_DAYS="$2"
+            shift 2
             ;;
-        --custom-clone)
-            SCRIPT_ACTION="custom-clone"
-            shift
-            ;;
+
         # System operations
         --update)
             SCRIPT_ACTION="update"
@@ -513,23 +565,7 @@ parse_arguments() {
             SCRIPT_ACTION="view-logs"
             shift
             ;;
-        # SSH operations
-        --test-ssh)
-            SCRIPT_ACTION="test-ssh"
-            shift
-            ;;
-        --backup-ssh)
-            SCRIPT_ACTION="backup-ssh"
-            shift
-            ;;
-        --restore-ssh)
-            SCRIPT_ACTION="restore-ssh"
-            shift
-            ;;
-        --reset-ssh)
-            SCRIPT_ACTION="reset-ssh"
-            shift
-            ;;
+
         # Git operations
         --git-pull)
             SCRIPT_ACTION="git-pull"
@@ -568,113 +604,131 @@ fi
 # Main Execution
 ###############################################################################
 main() {
+    # Handle script actions
     if [ -z "$SCRIPT_ACTION" ]; then
-        check_for_updates
-    fi
-
-    while true; do
-        if [ -z "$SCRIPT_ACTION" ]; then
-            # No arguments or no action set by arguments: show main menu
-            check_prerequisites
+        # No arguments provided - show main menu
+        while true; do
             display_main_menu
             handle_main_menu_input
-        else
-            # SCRIPT_ACTION is set from arguments, run corresponding logic
-            case "$SCRIPT_ACTION" in
-            build-public)
-                build_repo_branch "bp-public-experimental" "staging-DONOTUSE" "bluepilot experimental" "$GIT_BP_PRIVATE_REPO" "$GIT_BP_PUBLIC_REPO"
-                ;;
-            build-dev)
-                build_repo_branch "bp-internal-dev" "bp-internal-dev-build" "bluepilot internal dev" "$GIT_BP_PRIVATE_REPO"
-                ;;
-            clone-public-bp)
-                clone_public_bluepilot
-                ;;
-            clone-internal-dev-build)
-                clone_internal_dev_build
-                ;;
-            clone-internal-dev)
-                clone_internal_dev
-                ;;
-            custom-clone)
-                if [ -z "$REPO" ] || [ -z "$CLONE_BRANCH" ]; then
-                    print_error "Error: --custom-clone requires --repo and --clone-branch parameters."
-                    show_help
-                    exit 1
-                fi
-                case "$REPO" in
-                bluepilotdev) GIT_REPO_URL="$GIT_BP_PUBLIC_REPO" ;;
-                sp-dev-c3) GIT_REPO_URL="$GIT_BP_PRIVATE_REPO" ;;
-                sunnypilot) GIT_REPO_URL="$GIT_SP_REPO" ;;
-                commaai) GIT_REPO_URL="$GIT_COMMA_REPO" ;;
-                *)
-                    print_error "[-] Unknown repository: $REPO"
-                    exit 1
-                    ;;
-                esac
-                clone_repo_bp "repository '$REPO' with branch '$CLONE_BRANCH'" "$GIT_REPO_URL" "$CLONE_BRANCH" "no" "yes"
-                if [ ! -f "/data/openpilot/prebuilt" ]; then
-                    print_warning "[-] No prebuilt marker found. Might need to compile."
-                    read -p "Compile now? (y/N): " compile_confirm
-                    if [[ "$compile_confirm" =~ ^[Yy]$ ]]; then
-                        print_info "[-] Running scons..."
-                        cd /data/openpilot
-                        scons -j"$(nproc)" || {
-                            print_error "[-] SCons failed."
-                            exit 1
-                        }
-                        print_success "[-] Compilation completed."
-                    fi
-                fi
-                reboot_device_bp
-                ;;
-            custom-build)
-                if [ -z "$REPO" ] || [ -z "$CLONE_BRANCH" ] || [ -z "$BUILD_BRANCH" ]; then
-                    print_error "Error: --custom-build requires --repo, --clone-branch, and --build-branch."
-                    show_help
-                    exit 1
-                fi
-                case "$REPO" in
-                bluepilotdev) GIT_REPO_URL="$GIT_BP_PUBLIC_REPO" ;;
-                sp-dev-c3) GIT_REPO_URL="$GIT_BP_PRIVATE_REPO" ;;
-                sunnypilot) GIT_REPO_URL="$GIT_SP_REPO" ;;
-                commaai) GIT_REPO_URL="$GIT_COMMA_REPO" ;;
-                *)
-                    print_error "[-] Unknown repository: $REPO"
-                    exit 1
-                    ;;
-                esac
-                local COMMIT_DESC_HEADER="Custom Build"
-                build_repo_branch "$CLONE_BRANCH" "$BUILD_BRANCH" "$COMMIT_DESC_HEADER" "$GIT_REPO_ORIGIN"
-                print_success "[-] Action completed successfully"
-                ;;
-            update) update_script ;;
-            reboot) reboot_device ;;
-            shutdown) shutdown_device ;;
-            view-logs) display_logs ;;
-            test-ssh) test_ssh_connection ;;
-            backup-ssh) backup_ssh ;;
-            restore-ssh) restore_ssh ;;
-            reset-ssh) reset_ssh ;;
-            import-ssh) import_ssh_keys $PRIVATE_KEY_FILE $PUBLIC_KEY_FILE ;;
-            git-pull) fetch_pull_latest_changes ;;
-            git-status) display_git_status ;;
-            git-branch)
-                if [ -n "$NEW_BRANCH" ]; then
-                    cd /data/openpilot && git checkout "$NEW_BRANCH"
-                else
-                    print_error "Error: Branch name required"
-                    exit 1
-                fi
-                ;;
-            *)
-                print_error "Invalid build type. Exiting."
+        done
+    else
+        case "$SCRIPT_ACTION" in
+        # Backup operations
+        backup)
+            if [ -n "$NETWORK_ID" ]; then
+                perform_automated_backup "$NETWORK_ID"
+            else
+                backup_device
+            fi
+            ;;
+        restore_device)
+            restore_backup
+            ;;
+        migrate_backup)
+            migrate_legacy_backup
+            ;;
+
+        # SSH operations
+        test_github_ssh)
+            test_github_ssh
+            ;;
+        reset_ssh)
+            reset_ssh
+            ;;
+        copy_ssh_persist)
+            copy_ssh_config_and_keys
+            ;;
+
+        # Network operations
+        manage_locations)
+            manage_network_locations_menu
+            ;;
+        manage_jobs)
+            manage_auto_sync_and_backup_jobs
+            ;;
+
+        # Build operations
+        build-dev)
+            build_repo_branch "bp-internal-dev" "bp-internal-dev-build" "bluepilot internal dev" "$GIT_BP_PRIVATE_REPO"
+            ;;
+        build-public)
+            build_repo_branch "bp-public-experimental" "staging-DONOTUSE" "bluepilot experimental" "$GIT_BP_PRIVATE_REPO" "$GIT_BP_PUBLIC_REPO"
+            ;;
+        custom-build)
+            if [ -z "$REPO" ] || [ -z "$CLONE_BRANCH" ] || [ -z "$BUILD_BRANCH" ]; then
+                print_error "Error: --custom-build requires --repo, --clone-branch, and --build-branch."
+                show_help
                 exit 1
-                ;;
-            esac
-            exit 0
-        fi
-    done
+            fi
+            custom_build_process
+            ;;
+
+        # Route operations
+        route_sync)
+            if [ -n "$NETWORK_ID" ]; then
+                sync_all_routes "$NETWORK_ID"
+            else
+                sync_routes_menu
+            fi
+            ;;
+        sync_single_route)
+            if [ -z "$ROUTE_BASE" ]; then
+                print_error "Route base name required"
+                exit 1
+            fi
+            if [ -n "$NETWORK_ID" ]; then
+                sync_single_route "$ROUTE_BASE" "$NETWORK_ID"
+            else
+                sync_single_route_interactive "$ROUTE_BASE"
+            fi
+            ;;
+        view_routes)
+            view_routes_menu
+            ;;
+        cleanup_routes)
+            if [ -n "$CLEANUP_DAYS" ]; then
+                cleanup_route_files "$CLEANUP_DAYS"
+            else
+                manage_route_storage
+            fi
+            ;;
+
+        # System operations
+        update)
+            update_script
+            ;;
+        reboot)
+            reboot_device
+            ;;
+        shutdown)
+            shutdown_device
+            ;;
+        view-logs)
+            display_logs
+            ;;
+
+        # Git operations
+        git-pull)
+            fetch_pull_latest_changes
+            ;;
+        git-status)
+            display_git_status
+            ;;
+        git-branch)
+            if [ -n "$NEW_BRANCH" ]; then
+                cd /data/openpilot && git checkout "$NEW_BRANCH"
+            else
+                print_error "Error: Branch name required"
+                exit 1
+            fi
+            ;;
+        *)
+            print_error "Invalid build type. Exiting."
+            exit 1
+            ;;
+        esac
+        exit 0
+    fi
 }
 
 ###############################################################################
