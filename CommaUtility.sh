@@ -325,7 +325,7 @@ function load_modules() {
 
 check_prerequisites() {
     local errors=0
-    echo -e "│ Checking Prerequisites..."
+    echo -ne "│ Checking Prerequisites...\r\033[K"
 
     # Check disk space in /data
     local available_space
@@ -688,13 +688,13 @@ main() {
 ###############################################################################
 run_script() {
 
-    echo -e "┌────────────────────────────────────────────────────"
+    echo -e "┌──────────────────────────────────────────"
     # Update the main script to the latest version
     update_main_script
-    echo -e "├────────────────────────────────────────────────────"
+    echo -e "├──────────────────────────────────────────"
     # Load all modules and check for updates
     load_modules
-    echo -e "├────────────────────────────────────────────────────"
+    echo -e "├──────────────────────────────────────────"
     # Check for prerequisites
     if ! check_prerequisites; then
         print_error "Prerequisite Checks Failed.\nPlease fix the above errors."
@@ -702,13 +702,14 @@ run_script() {
     else
         echo -e "│ ${GREEN}All prerequisites checks passed.${NC}"
     fi
-    echo -e "├────────────────────────────────────────────────────"
+    echo -e "├──────────────────────────────────────────"
 
     # Initialize the network location config
     init_network_config
 
-    echo -e "│ Initialization complete.  Showing main menu..."
-    echo -e "└────────────────────────────────────────────────────"
+    echo -e "│ Initialization complete..."
+    echo -e "│ Showing Main Menu..."
+    echo -e "└──────────────────────────────────────────"
 
     # Wait for 10 seconds before continuing
     sleep 3

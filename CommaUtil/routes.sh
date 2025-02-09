@@ -72,7 +72,7 @@ manage_route_storage() {
 
 get_route_duration() {
     local route_base="$1"
-    local segments total_duration=0
+    local segments=0 total_duration=0
     segments=$(find "$ROUTES_DIR" -maxdepth 1 -type d -name "${route_base}--*" | wc -l)
     total_duration=$((segments * 60))
     printf "%02d:%02d:%02d" $((total_duration / 3600)) $(((total_duration % 3600) / 60)) $((total_duration % 60))
@@ -199,9 +199,9 @@ concat_route_menu() {
     mkdir -p "$output_dir"
     while true; do
         clear
-        echo "┌──────────────────────────────────────────────┐"
-        echo "│            Concatenate Route Files           │"
-        echo "└──────────────────────────────────────────────┘"
+        echo "┌───────────────────────────────────────────────"
+        echo "│            Concatenate Route Files           "
+        echo "└───────────────────────────────────────────────"
         echo "│ Route: $route_base"
         echo "│"
         echo "│ Select files to concatenate:"
@@ -253,9 +253,9 @@ display_routes_table() {
 
     # Check if no routes were found.
     if [ ${#routes[@]} -eq 0 ]; then
-        echo "┌───────────────────────────────────────────────────┐"
-        echo "│                No routes available                │"
-        echo "└───────────────────────────────────────────────────┘"
+        echo "┌────────────────────────────────────────────────────"
+        echo "│                No routes available                "
+        echo "└────────────────────────────────────────────────────"
         return 0
     fi
 
@@ -334,7 +334,8 @@ view_route_details_interactive() {
     local route
     route=$(select_single_route) || return
     view_route_details "$route"
-    pause_for_user
+    # pause_for_user
+    return
 }
 
 ###############################################################################
@@ -419,9 +420,9 @@ select_single_route() {
         return 1
     fi
     {
-        echo "┌───────────────────────────────────────────────────┐"
-        echo "│              Select a Route to Manage             │"
-        echo "├───────────────────────────────────────────────────┘"
+        echo "┌────────────────────────────────────────────────────"
+        echo "│              Select a Route to Manage             "
+        echo "├────────────────────────────────────────────────────"
         for ((i = 0; i < total_routes; i++)); do
             local route timestamp duration segments size
             route=$(jq -r ".[$i].route" "$cache_file")
@@ -524,9 +525,9 @@ view_route_details() {
     size=$(echo "$route_detail" | jq -r .size)
     while true; do
         clear
-        echo "┌──────────────────────────────────────────────┐"
-        echo "│                Route Details                 │"
-        echo "├──────────────────────────────────────────────┘"
+        echo "┌───────────────────────────────────────────────"
+        echo "│                Route Details                "
+        echo "├───────────────────────────────────────────────"
         echo "│ Route ID: $route_base"
         echo "│ Date/Time: $timestamp"
         echo "│ Duration: $duration"
@@ -540,7 +541,7 @@ view_route_details() {
         echo "│ 3. View Errors/Warnings only"
         echo "│ 4. Play Video"
         echo "│ 5. Concatenate Route Files"
-        echo "│ 6. Transfer Route"
+        echo "│ 6. Remove Route"
         echo "│ Q. Back"
         echo "└───────────────────────────────────────────────"
         read -p "Make a selection: " choice
@@ -550,7 +551,7 @@ view_route_details() {
         3) view_filtered_rlog "$route_base" ;;
         4) play_route_video "$route_base" ;;
         5) concat_route_menu "$route_base" ;;
-        6) transfer_routes_menu "$route_base" ;;
+        6) remove_single_route_interactive "$route_base" ;;
         [qQ]) return ;;
         *)
             print_error "Invalid choice."

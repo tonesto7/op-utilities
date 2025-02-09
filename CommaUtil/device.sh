@@ -106,39 +106,40 @@ restore_boot_and_logo() {
 }
 
 toggle_boot_logo() {
-    # clear
-    print_info "Boot Icon and Logo Update/Restore Utility"
-    echo "┌────────────────────────────────────────────────────"
+    clear
+    echo "┌───────────────────────────────────────────────"
+    echo "│ Boot Icon and Logo Update/Restore Utility"
+    echo "└───────────────────────────────────────────────"
 
     # Check if the original files exist
     if [ ! -f "$BOOT_IMG" ]; then
-        print_error "Boot image ($BOOT_IMG) is missing; cannot proceed."
+        print_error "Boot image file ($BOOT_IMG) is missing; cannot proceed."
         pause_for_user
         return 1
     fi
     if [ ! -f "$LOGO_IMG" ]; then
-        print_error "Logo image ($LOGO_IMG) is missing; cannot proceed."
+        print_error "Logo image file ($LOGO_IMG) is missing; cannot proceed."
         pause_for_user
         return 1
     fi
 
     # If backup files exist, offer restoration; otherwise, offer update.
     if [ -f "$BOOT_IMG_BKP" ] && [ -f "$LOGO_IMG_BKP" ]; then
-        echo "Backup files exist."
-        read -p "Do you want to restore the original boot and logo images? (y/N): " answer
+        echo "No Boot image or logo image backup exists."
+        read -p "Do you want to restore the original boot image and logo image? (y/N): " answer
         if [[ "$answer" =~ ^[Yy]$ ]]; then
             restore_boot_and_logo
         else
-            print_info "Restore cancelled."
+            print_info "│ Restore cancelled."
             pause_for_user
         fi
     else
-        echo "No backups found."
+        echo "No Boot image or logo image backup files found."
         read -p "Do you want to update boot and logo images with BluePilot files? (y/N): " answer
         if [[ "$answer" =~ ^[Yy]$ ]]; then
             update_boot_and_logo
         else
-            print_info "Update cancelled."
+            print_info "│ Update cancelled."
             pause_for_user
         fi
     fi
@@ -149,13 +150,20 @@ toggle_boot_logo() {
 ###############################################################################
 
 display_os_info_short() {
-    print_info "| OS Information:"
+    print_info "│ OS Information:"
     local agnos_version
     agnos_version=$(cat /VERSION 2>/dev/null)
+    build_time=$(awk 'NR==2' /BUILD 2>/dev/null)
     if [ -n "$agnos_version" ]; then
-        echo "| └─ AGNOS: v$agnos_version"
+        echo "│ ├─ AGNOS: v$agnos_version ($build_time)"
     else
-        echo "| └─ AGNOS: Unknown"
+        echo "│ ├─ AGNOS: Unknown"
+    fi
+
+    if [ -f "$BOOT_IMG_BKP" ] && [ -f "$LOGO_IMG_BKP" ]; then
+        echo -e "│ └─ Custom Boot/Logo: ${GREEN}Yes${NC}"
+    else
+        echo -e "│ └─ Custom Boot/Logo: No"
     fi
 }
 
@@ -165,9 +173,16 @@ display_general_status() {
     agnos_version=$(cat /VERSION 2>/dev/null)
     build_time=$(awk 'NR==2' /BUILD 2>/dev/null)
     echo "┌───────────────────────────────────────────────────┐"
-    echo "│                 Other Items                       │"
+    echo "│                    Other Items                    │"
     echo "├───────────────────────────────────────────────────┘"
-    echo "│ - AGNOS: v$agnos_version ($build_time)"
+    echo "│ AGNOS: v$agnos_version ($build_time)"
+
+    # Check is the device has custom boot and logo images
+    if [ -f "$BOOT_IMG_BKP" ] && [ -f "$LOGO_IMG_BKP" ]; then
+        echo -e "│ Custom Boot/Logo Images: ${GREEN}Active${NC}"
+    else
+        echo -e "│ Custom Boot/Logo Images: Inactive"
+    fi
     echo "├────────────────────────────────────────────────────"
 }
 
@@ -189,7 +204,7 @@ display_logs() {
 
     if [[ $log_choice =~ ^[0-9]+$ ]] && ((log_choice > 0 && log_choice <= ${#log_files[@]})); then
         local log_file="${log_files[$((log_choice - 1))]}"
-        echo "Displaying contents of $log_file:"
+        echo "│ Displaying contents of $log_file:"
         cat "$log_file"
     elif [[ $log_choice =~ ^[Qq]$ ]]; then
         return
