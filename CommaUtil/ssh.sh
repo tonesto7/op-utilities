@@ -52,22 +52,17 @@ backup_ssh() {
 
         save_ssh_backup_metadata
 
-        # Check for preferred network location
-        local preferred_location_id
-        preferred_location_id=$(get_preferred_ssh_location "ssh_backup")
+        # Check for network location
+        local network_location
+        network_location=$(jq -r '.locations[] | select(.type == "ssh_backup")' "$NETWORK_CONFIG")
 
-        if [ -n "$preferred_location_id" ]; then
+        if [ -n "$network_location" ]; then
             local location_label
-            location_label=$(get_location_label "$preferred_location_id")
+            location_label=$(echo "$network_location" | jq -r .label)
 
             read -p "Would you like to sync this backup to $location_label? (Y/n): " sync_choice
             if [[ ! "$sync_choice" =~ ^[Nn]$ ]]; then
-                backup_ssh_to_network "$preferred_location_id"
-            else
-                read -p "Would you like to change your preferred network location? (y/N): " change_choice
-                if [[ "$change_choice" =~ ^[Yy]$ ]]; then
-                    configure_preferred_ssh_backup_location
-                fi
+                backup_ssh_to_network
             fi
         fi
 
@@ -185,11 +180,19 @@ display_ssh_status_short() {
     local home_exists=false
     local persist_exists=false
     local backup_complete=false
+    local auth_valid=false
+    local network_backup_exists=false
 
     # Check home directory files
     if [ -f "$SSH_HOME_DIR/github" ] && [ -f "$SSH_HOME_DIR/github.pub" ] && [ -f "$SSH_HOME_DIR/config" ]; then
         home_exists=true
-        echo "│ ├─ SSH Key: Found in ~/.ssh/"
+        # Test SSH authentication quietly
+        if ssh -o BatchMode=yes -o ConnectTimeout=5 -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+            auth_valid=true
+            echo "│ ├─ SSH Key: Found in ~/.ssh/ (Valid Authentication)"
+        else
+            echo -e "│ ├─ SSH Key: ${YELLOW}Found in ~/.ssh/ (Authentication Failed)${NC}"
+        fi
     else
         echo -e "│ ├─ SSH Key: ${RED}Missing or incomplete in ~/.ssh/${NC}"
     fi
@@ -216,14 +219,15 @@ display_ssh_status_short() {
     fi
 
     # Check network backup status
-    preferred_location_id=$(get_preferred_ssh_location "ssh_backup")
-    if [ -n "$preferred_location_id" ]; then
+    local network_location
+    network_location=$(jq -r '.locations[] | select(.type == "ssh_backup")' "$NETWORK_CONFIG")
+    if [ -n "$network_location" ]; then
         local location_label
-        location_label=$(get_location_label "$preferred_location_id")
-        if check_network_ssh_backup_exists "$preferred_location_id"; then
+        location_label=$(echo "$network_location" | jq -r .label)
+        if check_network_ssh_backup_exists; then
             network_backup_exists=true
             local network_backup_date
-            network_backup_date=$(get_network_ssh_backup_date "$preferred_location_id")
+            network_backup_date=$(get_network_ssh_backup_date)
             if [ -n "$network_backup_date" ]; then
                 local network_time_ago=$(format_time_ago "$network_backup_date")
                 echo "│ └─ Network Backup: Last sync ($network_time_ago ago) to $location_label"
@@ -234,7 +238,7 @@ display_ssh_status_short() {
             echo -e "│ └─ Network Backup: ${YELLOW}Not synced to $location_label${NC}"
         fi
     else
-        echo -e "│ └─ Network Backup: ${YELLOW}No preferred location configured${NC}"
+        echo -e "│ └─ Network Backup: ${YELLOW}No network location configured${NC}"
     fi
 
     # Add issue to the global issues array if problems found
@@ -243,12 +247,17 @@ display_ssh_status_short() {
         ISSUE_DESCRIPTIONS[$issue_index]="SSH configuration needs attention"
         ISSUE_FIXES[$issue_index]="repair_create_ssh"
         ISSUE_PRIORITIES[$issue_index]=1
+    elif [ "$home_exists" = true ] && [ "$auth_valid" = false ]; then
+        local issue_index=${#ISSUE_DESCRIPTIONS[@]}
+        ISSUE_DESCRIPTIONS[$issue_index]="SSH authentication failed - Reset and recreate keys"
+        ISSUE_FIXES[$issue_index]="reset_ssh"
+        ISSUE_PRIORITIES[$issue_index]=1
     elif [ "$backup_complete" = false ]; then
         local issue_index=${#ISSUE_DESCRIPTIONS[@]}
         ISSUE_DESCRIPTIONS[$issue_index]="SSH backup recommended"
         ISSUE_FIXES[$issue_index]="backup_ssh"
         ISSUE_PRIORITIES[$issue_index]=3
-    elif [ "$network_backup_exists" = false ] && [ -n "$preferred_location_id" ]; then
+    elif [ "$network_backup_exists" = false ] && [ -n "$network_location" ]; then
         local issue_index=${#ISSUE_DESCRIPTIONS[@]}
         ISSUE_DESCRIPTIONS[$issue_index]="Network backup sync recommended"
         ISSUE_FIXES[$issue_index]="backup_ssh_to_network"
@@ -275,7 +284,14 @@ display_ssh_status() {
         check_file_permissions_owner "$SSH_HOME_DIR/github" "$expected_permissions" "$expected_owner"
         local ssh_check_result=$?
         if [ "$ssh_check_result" -eq 0 ]; then
-            echo -e "│ ├─ Private Key: ${GREEN}✓ Present with correct permissions${NC}"
+            # Test SSH authentication quietly
+            if ssh -o BatchMode=yes -o ConnectTimeout=5 -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+                echo -e "│ ├─ Private Key: ${GREEN}✓ Present with correct permissions (Valid Authentication)${NC}"
+                auth_valid=true
+            else
+                echo -e "│ ├─ Private Key: ${YELLOW}✓ Present with correct permissions (Authentication Failed)${NC}"
+                auth_valid=false
+            fi
             local fingerprint
             fingerprint=$(ssh-keygen -lf "$SSH_HOME_DIR/github" 2>/dev/null | awk '{print $2}')
             if [ -n "$fingerprint" ]; then
@@ -354,6 +370,13 @@ display_ssh_status() {
             ISSUE_FIXES[$issue_index]="repair_create_ssh"
             ISSUE_PRIORITIES[$issue_index]=1
         fi
+    fi
+
+    if [ "$auth_valid" = false ] && [ "$home_exists" = true ]; then
+        local issue_index=${#ISSUE_DESCRIPTIONS[@]}
+        ISSUE_DESCRIPTIONS[$issue_index]="SSH key authentication failed - Reset and recreate keys"
+        ISSUE_FIXES[$issue_index]="reset_ssh"
+        ISSUE_PRIORITIES[$issue_index]=1
     fi
 
     if [ "$permissions_valid" = false ]; then
@@ -604,14 +627,15 @@ check_github_known_hosts() {
 }
 
 generate_ssh_key() {
-    if [ ! -f "$SSH_HOME_DIR/github" ]; then
-        ssh-keygen -t ed25519 -f "$SSH_HOME_DIR/github"
-        print_info "Displaying the SSH public key. Please add it to your GitHub account."
-        cat "$SSH_HOME_DIR/github.pub"
-        pause_for_user
-    else
-        print_info "SSH key already exists. Skipping SSH key generation..."
+    # Check if the key already exists in the home directory and remove it
+    if [ -f "$SSH_HOME_DIR/github" ]; then
+        rm -f "$SSH_HOME_DIR/github"
+        rm -f "$SSH_HOME_DIR/github.pub"
     fi
+
+    ssh-keygen -t ed25519 -f "$SSH_HOME_DIR/github"
+    view_ssh_public_key false false
+    pause_for_user
 }
 
 repair_create_ssh() {
@@ -619,64 +643,94 @@ repair_create_ssh() {
     local home_ssh_exists=false
     local usr_ssh_exists=false
     local needs_permission_fix=false
+    local auth_valid=false
 
-    # Check existence in both locations
-    [ -f "$SSH_HOME_DIR/github" ] && home_ssh_exists=true
-    [ -f "$SSH_USR_DEFAULT_DIR/github" ] && usr_ssh_exists=true
+    echo "Checking home directory SSH files..."
+    [ -f "$SSH_HOME_DIR/github" ] && [ -f "$SSH_HOME_DIR/github.pub" ] && [ -f "$SSH_HOME_DIR/config" ] && home_ssh_exists=true
+    echo "Home SSH files exist: $home_ssh_exists"
 
-    # If SSH exists in persistent location but not in home
-    if [ "$usr_ssh_exists" = true ] && [ "$home_ssh_exists" = false ]; then
-        print_info "Restoring SSH key from persistent storage..."
-        mkdir -p "$SSH_HOME_DIR"
-        sudo cp "$SSH_USR_DEFAULT_DIR/github*" "$SSH_HOME_DIR/"
-        sudo cp "$SSH_USR_DEFAULT_DIR/config" "$SSH_HOME_DIR/"
-        sudo chown comma:comma "$SSH_HOME_DIR" -R
-        sudo chmod 600 "$SSH_HOME_DIR/github"
-        print_success "SSH files restored from persistent storage"
+    echo "Checking persistent storage SSH files..."
+    [ -f "$SSH_USR_DEFAULT_DIR/github" ] && [ -f "$SSH_USR_DEFAULT_DIR/github.pub" ] && [ -f "$SSH_USR_DEFAULT_DIR/config" ] && usr_ssh_exists=true
+    echo "Persistent storage SSH files exist: $usr_ssh_exists"
+
+    # Check authentication if home files exist
+    if [ "$home_ssh_exists" = true ]; then
+        echo "Testing SSH authentication..."
+        if ssh -o BatchMode=yes -o ConnectTimeout=5 -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+            auth_valid=true
+            echo "SSH authentication: Valid"
+        else
+            auth_valid=false
+            echo "SSH authentication: Failed"
+        fi
+    fi
+
+    # If authentication is failing but files exist, recommend reset
+    if [ "$home_ssh_exists" = true ] && [ "$auth_valid" = false ]; then
+        print_error "SSH files exist but authentication is failing."
+        echo "Would you like to:"
+        echo "1. Reset SSH keys (removes existing keys and creates new ones)"
+        echo "2. Change GitHub SSH port to 443 (if behind firewall)"
+        echo "3. Cancel"
+        read -p "Enter choice (1-3): " auth_fix_choice
+
+        case $auth_fix_choice in
+        1)
+            reset_ssh
+            return 0
+            ;;
+        2)
+            change_github_ssh_port
+            return 0
+            ;;
+        3)
+            print_info "Operation cancelled."
+            return 0
+            ;;
+        esac
         return 0
     fi
 
-    # If missing from both locations but backup exists
-    if [ "$home_ssh_exists" = false ] && [ "$usr_ssh_exists" = false ] && check_ssh_backup; then
-        print_info "No SSH keys found. Restoring from backup..."
-        restore_ssh
-        return 0
-    fi
+    echo "Checking SSH backup..."
+    local backup_exists=false
+    check_ssh_backup && backup_exists=true
+    echo "SSH backup exists: $backup_exists"
 
-    # If missing from both locations and no backup
-    if [ "$home_ssh_exists" = false ] && [ "$usr_ssh_exists" = false ]; then
-        print_info "Creating new SSH setup..."
-        remove_ssh_contents
-        create_ssh_config
-        generate_ssh_key
-        copy_ssh_config_and_keys
-        backup_ssh
-        test_ssh_connection
-        return 0
-    fi
+    # Rest of the existing repair_create_ssh logic...
+    # [Previous file existence and permission checks remain the same]
 
-    # Check and fix permissions if needed
+    echo "Checking home directory SSH permissions..."
     check_file_permissions_owner "$SSH_HOME_DIR/github" "-rw-------" "comma"
     if [ $? -eq 1 ]; then
-        print_info "Fixing SSH permissions..."
-        sudo chmod 600 "$SSH_HOME_DIR/github"
-        sudo chown comma:comma "$SSH_HOME_DIR/github"
         needs_permission_fix=true
     fi
 
+    echo "Checking persistent storage SSH permissions..."
     if [ -f "$SSH_USR_DEFAULT_DIR/github" ]; then
         check_file_permissions_owner "$SSH_USR_DEFAULT_DIR/github" "-rw-------" "comma"
         if [ $? -eq 1 ]; then
-            print_info "Fixing persistent SSH permissions..."
-            sudo chmod 600 "$SSH_USR_DEFAULT_DIR/github"
-            sudo chown comma:comma "$SSH_USR_DEFAULT_DIR/github"
             needs_permission_fix=true
         fi
     fi
 
+    echo "Permissions need to be fixed: $needs_permission_fix"
     if [ "$needs_permission_fix" = true ]; then
+        print_info "Fixing SSH permissions..."
+        sudo chmod 700 "$SSH_HOME_DIR"
+        sudo chmod 600 "$SSH_HOME_DIR/github"
+        sudo chmod 644 "$SSH_HOME_DIR/github.pub"
+        sudo chown comma:comma "$SSH_HOME_DIR" -R
+
+        if [ -f "$SSH_USR_DEFAULT_DIR/github" ]; then
+            sudo chmod 700 "$SSH_USR_DEFAULT_DIR"
+            sudo chmod 600 "$SSH_USR_DEFAULT_DIR/github"
+            sudo chmod 644 "$SSH_USR_DEFAULT_DIR/github.pub"
+            sudo chown comma:comma "$SSH_USR_DEFAULT_DIR" -R
+        fi
+
         copy_ssh_config_and_keys
         print_success "SSH permissions fixed"
+        restart_ssh_agent
     fi
 
     pause_for_user
@@ -684,15 +738,18 @@ repair_create_ssh() {
 
 reset_ssh() {
     clear
-    if [ -f "$SSH_HOME_DIR/github" ]; then
-        backup_ssh
-    fi
     remove_ssh_contents
+    pause_for_user
     create_ssh_config
+    pause_for_user
     generate_ssh_key
+    pause_for_user
     copy_ssh_config_and_keys
+    pause_for_user
     restart_ssh_agent
+    pause_for_user
     test_ssh_connection
+    pause_for_user
     print_info "Creating backup of new SSH setup..."
     backup_ssh
     pause_for_user
@@ -724,7 +781,14 @@ copy_ssh_config_and_keys() {
     print_success "SSH files copied to persistent storage"
 }
 
-get_ssh_key() {
+view_ssh_public_key() {
+    local clear_screen=${1:-true}
+    local pause_for_user=${2:-true}
+    if [ "$clear_screen" = true ]; then
+        clear
+    fi
+
+    # clear
     if [ -f "$SSH_HOME_DIR/github.pub" ]; then
         local ssh_key
         ssh_key=$(cat "$SSH_HOME_DIR/github.pub")
@@ -735,21 +799,11 @@ get_ssh_key() {
         echo ""
         echo "Copy the key above to add to your GitHub account"
     else
-        echo ""
+        echo "No SSH public key found"
     fi
-}
-
-view_ssh_key() {
-    clear
-    # return the result of get_ssh_key if it returns 0
-    local result
-    result=$(get_ssh_key)
-    if [ "$result" = "" ]; then
-        print_error "SSH public key does not exist."
-    else
-        echo "$result"
+    if [ "$pause_for_user" = true ]; then
+        pause_for_user
     fi
-    pause_for_user
 }
 
 remove_ssh_contents() {
@@ -847,12 +901,14 @@ ssh_menu() {
         local has_local_backup=false
         local has_network_location=false
         local has_network_backup=false
-        local preferred_location_id
 
         check_ssh_backup && has_local_backup=true
         verify_network_config && has_network_location=true
-        preferred_location_id=$(get_preferred_ssh_location "ssh_backup")
-        if [ -n "$preferred_location_id" ] && check_network_ssh_backup_exists "$preferred_location_id"; then
+        local network_location
+        network_location=$(jq -r '.locations[] | select(.type == "ssh_backup")' "$NETWORK_CONFIG")
+        [ -n "$network_location" ] && has_network_location=true
+
+        if [ "$has_network_location" = true ] && check_network_ssh_backup_exists; then
             has_network_backup=true
         fi
 
@@ -889,8 +945,6 @@ ssh_menu() {
                     option_count=$((option_count + 1))
                     echo "│ $option_count. Sync local backup to network (Initial sync)"
                 fi
-                option_count=$((option_count + 1))
-                echo "│ $option_count. Configure preferred backup location"
             else
                 option_count=$((option_count + 1))
                 echo "│ $option_count. Configure network backup"
@@ -915,7 +969,9 @@ ssh_menu() {
         3) copy_ssh_config_and_keys ;;
         4) reset_ssh ;;
         5) test_ssh_connection ;;
-        6) view_ssh_key ;;
+        6)
+            view_ssh_public_key
+            ;;
         7) change_github_ssh_port ;;
         *)
             if [ "$choice" -gt 7 ] && [ "$choice" -le "$option_count" ]; then

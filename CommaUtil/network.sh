@@ -99,13 +99,13 @@ generate_location_id() {
 
 # Enhance select_network_location to output location ID when needed
 select_network_location_id() {
-    local location_info
-    location_info=$(select_network_location)
-    if [ $? -eq 0 ]; then
-        local json_location
-        json_location=$(echo "$location_info" | cut -d' ' -f2-)
-        echo "$json_location" | jq -r '.location_id'
-        return 0
+    local required_type="$1"
+    if [ -n "$required_type" ]; then
+        local location_id=$(jq -r --arg type "$required_type" '.locations[] | select(.type == $type) | .location_id' "$NETWORK_CONFIG")
+        if [ -n "$location_id" ] && [ "$location_id" != "null" ]; then
+            echo "$location_id"
+            return 0
+        fi
     fi
     return 1
 }
@@ -148,12 +148,7 @@ get_network_location_by_id() {
 add_smb_location() {
     local location_type="$1"
     local type_label
-
-    if [ "$location_type" = "route_sync" ]; then
-        type_label="Route Sync"
-    else
-        type_label="Device Backup"
-    fi
+    type_label="SSH Backup"
 
     # Check if location of this type already exists
     local existing_location
@@ -238,12 +233,7 @@ add_smb_location() {
 add_ssh_location() {
     local location_type="$1"
     local type_label
-
-    if [ "$location_type" = "route_sync" ]; then
-        type_label="Route Sync"
-    else
-        type_label="Device Backup"
-    fi
+    type_label="SSH Backup"
 
     # Check if location of this type already exists
     local existing_location
@@ -367,37 +357,14 @@ test_all_connections() {
     echo "│           Testing Network Locations           │"
     echo "└───────────────────────────────────────────────┘"
 
-    # Test Route Sync Location
-    local route_loc status
-    route_loc=$(jq -r '.locations[] | select(.type == "route_sync")' "$NETWORK_CONFIG")
-    if [ -n "$route_loc" ]; then
-        local protocol label
-        protocol=$(echo "$route_loc" | jq -r .protocol)
-        label=$(echo "$route_loc" | jq -r .label)
-        echo -n "│ Testing Route Sync Location ($label)... "
-        if [ "$protocol" = "smb" ]; then
-            status=$(test_smb_connection "$route_loc")
-        else
-            status=$(test_network_ssh "$route_loc")
-        fi
-        if [ "$status" = "Valid" ]; then
-            echo -e "│ ${GREEN}Connected${NC}"
-        else
-            echo -e "│ ${RED}Failed${NC}"
-            echo "│ Error: $status"
-        fi
-    else
-        echo -e "│ ${YELLOW}No Route Sync Location configured${NC}"
-    fi
-
-    # Test Device Backup Location
-    local backup_loc
-    backup_loc=$(jq -r '.locations[] | select(.type == "device_backup")' "$NETWORK_CONFIG")
+    # Test SSH Backup Location
+    local backup_loc status
+    backup_loc=$(jq -r '.locations[] | select(.type == "ssh_backup")' "$NETWORK_CONFIG")
     if [ -n "$backup_loc" ]; then
         local protocol label
         protocol=$(echo "$backup_loc" | jq -r .protocol)
         label=$(echo "$backup_loc" | jq -r .label)
-        echo -n "│ Testing Device Backup Location ($label)... "
+        echo -n "│ Testing SSH Backup Location ($label)... "
         if [ "$protocol" = "smb" ]; then
             status=$(test_smb_connection "$backup_loc")
         else
@@ -410,7 +377,7 @@ test_all_connections() {
             echo "│ Error: $status"
         fi
     else
-        echo -e "│ ${YELLOW}No Device Backup Location configured${NC}"
+        echo -e "│ ${YELLOW}No SSH Backup Location configured${NC}"
     fi
 
     pause_for_user
@@ -477,15 +444,67 @@ test_network_ssh() {
     return 1
 }
 
+check_smb_ssh_backup_exists() {
+    local location="$1"
+    local server share username path
+    server=$(echo "$location" | jq -r .server)
+    share=$(echo "$location" | jq -r .share)
+    username=$(echo "$location" | jq -r .username)
+    path=$(echo "$location" | jq -r .path)
+    local cred_file=$(echo "$location" | jq -r .credential_file)
+    local password
+
+    password=$(decrypt_credentials "$cred_file")
+    if [ -z "$password" ]; then
+        return 1
+    fi
+
+    # Check if backup exists by trying to access the backup file
+    local remote_path="$path/ssh_backup"
+    if ! smbclient "//${server}/${share}" -U "${username}%${password}" -c "ls ${remote_path}/ssh_backup.tar.gz" >/dev/null 2>&1; then
+        return 1
+    fi
+
+    return 0
+}
+
+check_network_ssh_backup_exists() {
+    local location_id="$1"
+    local location
+
+    # If no location_id provided, try to get the ssh_backup location
+    if [ -z "$location_id" ]; then
+        location=$(jq -r '.locations[] | select(.type == "ssh_backup")' "$NETWORK_CONFIG")
+    else
+        location=$(get_network_location_by_id "$location_id")
+    fi
+
+    if [ -z "$location" ] || [ "$location" = "null" ]; then
+        return 1
+    fi
+
+    local protocol
+    protocol=$(echo "$location" | jq -r .protocol)
+
+    case "$protocol" in
+    "smb")
+        check_smb_ssh_backup_exists "$location"
+        return $?
+        ;;
+    "ssh")
+        check_ssh_ssh_backup_exists "$location"
+        return $?
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+}
+
 remove_network_location() {
     local location_type="$1"
     local type_label
-
-    if [ "$location_type" = "route_sync" ]; then
-        type_label="Route Sync"
-    else
-        type_label="Device Backup"
-    fi
+    type_label="SSH Backup"
 
     local existing_location
     existing_location=$(jq -r --arg type "$location_type" '.locations[] | select(.type == $type)' "$NETWORK_CONFIG")
@@ -534,36 +553,9 @@ manage_network_locations_menu() {
         echo "│          Network Location Management          │"
         echo "└───────────────────────────────────────────────┘"
 
-        # Show Route Sync Location
-        local route_loc
-        route_loc=$(jq -r '.locations[] | select(.type == "route_sync")' "$NETWORK_CONFIG")
-        if [ -n "$route_loc" ]; then
-            local protocol label status
-            protocol=$(echo "$route_loc" | jq -r .protocol)
-            label=$(echo "$route_loc" | jq -r .label)
-            if [ "$protocol" = "smb" ]; then
-                status=$(test_smb_connection "$route_loc")
-            else
-                status=$(test_network_ssh "$route_loc")
-            fi
-            if [ "$status" = "Valid" ]; then
-                echo -e "│ Route Sync Location:"
-                echo -e "│  - Label: ${GREEN}$label${NC}"
-                echo -e "│  - Protocol: ${GREEN}$protocol${NC}"
-                echo -e "│  - Status: ${GREEN}Connected${NC}"
-            else
-                echo -e "│ Route Sync Location:"
-                echo -e "│  - Label: ${RED}$label${NC}"
-                echo -e "│  - Protocol: ${RED}$protocol${NC}"
-                echo -e "│  - Status: ${RED}Disconnected${NC}"
-            fi
-        else
-            echo -e "│ Route Sync Location: ${YELLOW}Not Configured${NC}"
-        fi
-
-        # Show Device Backup Location
+        # Show SSH Backup Location
         local backup_loc
-        backup_loc=$(jq -r '.locations[] | select(.type == "device_backup")' "$NETWORK_CONFIG")
+        backup_loc=$(jq -r '.locations[] | select(.type == "ssh_backup")' "$NETWORK_CONFIG")
         if [ -n "$backup_loc" ]; then
             local protocol label status
             protocol=$(echo "$backup_loc" | jq -r .protocol)
@@ -574,37 +566,48 @@ manage_network_locations_menu() {
                 status=$(test_network_ssh "$backup_loc")
             fi
             if [ "$status" = "Valid" ]; then
-                echo -e "│ Device Backup Location:"
+                echo -e "│ SSH Backup Location:"
                 echo -e "│  - Label: ${GREEN}$label${NC}"
                 echo -e "│  - Protocol: ${GREEN}$protocol${NC}"
                 echo -e "│  - Status: ${GREEN}Connected${NC}"
             else
-                echo -e "│ Device Backup Location:"
+                echo -e "│ SSH Backup Location:"
                 echo -e "│  - Label: ${RED}$label${NC}"
                 echo -e "│  - Protocol: ${RED}$protocol${NC}"
                 echo -e "│  - Status: ${RED}Disconnected${NC}"
             fi
         else
-            echo -e "│ Device Backup Location: ${YELLOW}Not Configured${NC}"
+            echo -e "│ SSH Backup Location: ${YELLOW}Not Configured${NC}"
         fi
 
         echo "│"
         echo "│ Available Options:"
-        echo "│ 1. Configure Route Sync Location"
-        echo "│ 2. Configure Device Backup Location"
-        echo "│ 3. Remove Route Sync Location"
-        echo "│ 4. Remove Device Backup Location"
-        echo "│ 5. Test Connections"
+        if [ -n "$backup_loc" ]; then
+            echo "│ 1. Configure SSH Backup Location"
+        else
+            echo "│ 1. Remove SSH Backup Location"
+            echo "│ 2. Test Connection"
+        fi
         echo "│ Q. Back"
         echo "└───────────────────────────────────────────────┘"
 
         read -p "Make a selection: " choice
         case $choice in
-        1) configure_network_location "route_sync" ;;
-        2) configure_network_location "device_backup" ;;
-        3) remove_network_location "route_sync" ;;
-        4) remove_network_location "device_backup" ;;
-        5) test_all_connections ;;
+        1)
+            if [ -n "$backup_loc" ]; then
+                configure_network_location "ssh_backup"
+            else
+                remove_network_location "ssh_backup"
+            fi
+            ;;
+        2)
+            if [ -n "$backup_loc" ]; then
+                test_all_connections
+            else
+                print_error "No SSH Backup Location configured."
+                pause_for_user
+            fi
+            ;;
         [qQ]) return ;;
         *) print_error "Invalid choice." && pause_for_user ;;
         esac
@@ -614,16 +617,11 @@ manage_network_locations_menu() {
 configure_network_location() {
     local location_type="$1"
     local type_label
-
-    if [ "$location_type" = "route_sync" ]; then
-        type_label="Route Sync"
-    else
-        type_label="Device Backup"
-    fi
+    type_label="SSH Backup"
 
     clear
     echo "┌───────────────────────────────────────────────┐"
-    echo "│       Configure $type_label Location         │"
+    echo "│        Configure $type_label Location         │"
     echo "└───────────────────────────────────────────────┘"
     echo "│ Select Protocol:"
     echo "│ 1. SMB Share"
@@ -672,43 +670,32 @@ select_network_location() {
     echo "│            Select Network Location            │"
     echo "└───────────────────────────────────────────────┘"
 
-    local route_loc backup_loc
-    route_loc=$(jq -r '.locations[] | select(.type == "route_sync")' "$NETWORK_CONFIG")
-    backup_loc=$(jq -r '.locations[] | select(.type == "device_backup")' "$NETWORK_CONFIG")
+    local locations
+    locations=$(jq -r '.locations[] | "\(.type)|\(.label)"' "$NETWORK_CONFIG")
 
-    local count=1
-    if [ -n "$route_loc" ]; then
-        echo "│ $count) Route Sync: $(echo "$route_loc" | jq -r .label)"
-        count=$((count + 1))
-    fi
-    if [ -n "$backup_loc" ]; then
-        echo "│ $count) Device Backup: $(echo "$backup_loc" | jq -r .label)"
-    fi
-
-    if [ -z "$route_loc" ] && [ -z "$backup_loc" ]; then
+    if [ -z "$locations" ]; then
         print_error "No network locations configured."
         return 1
     fi
+
+    local count=1
+    while IFS='|' read -r type label; do
+        echo "│ $count) $type: $label"
+        count=$((count + 1))
+    done <<<"$locations"
 
     echo "│ Q) Cancel"
     echo "└────────────────────────────────────────────────"
 
     read -p "Select location: " choice
-    case $choice in
-    1)
-        if [ -n "$route_loc" ]; then
-            echo "$route_loc"
-            return 0
-        fi
-        ;;
-    2)
-        if [ -n "$backup_loc" ]; then
-            echo "$backup_loc"
-            return 0
-        fi
-        ;;
-    [qQ]) return 1 ;;
-    *) print_error "Invalid selection." ;;
-    esac
-    return 1
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -lt "$count" ]; then
+        location=$(jq -r ".locations[$(($choice - 1))]" "$NETWORK_CONFIG")
+        echo "$location"
+        return 0
+    elif [[ "$choice" =~ ^[qQ]$ ]]; then
+        return 1
+    else
+        print_error "Invalid selection."
+        return 1
+    fi
 }

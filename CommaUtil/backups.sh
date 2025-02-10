@@ -15,7 +15,6 @@
 readonly BACKUPS_SCRIPT_VERSION="3.0.1"
 readonly BACKUPS_SCRIPT_MODIFIED="2025-02-08"
 
-readonly BACKUP_BASE_DIR="/data/device_backup"
 readonly BACKUP_METADATA_FILE="metadata.json"
 readonly BACKUP_CHECKSUM_FILE="checksum.sha256"
 
@@ -47,6 +46,7 @@ backup_ssh_to_network() {
     location=$(get_network_location_by_id "$location_id")
     if [ $? -ne 0 ]; then
         print_error "Failed to get network location details"
+        pause_for_user
         return 1
     fi
 
@@ -54,6 +54,7 @@ backup_ssh_to_network() {
     if ! check_ssh_backup; then
         print_info "Creating local backup first..."
         backup_ssh
+        pause_for_user
     fi
 
     print_info "Backing up SSH files to network location..."
@@ -64,12 +65,15 @@ backup_ssh_to_network() {
     case "$protocol" in
     "smb")
         backup_ssh_to_smb "$location"
+        pause_for_user
         ;;
     "ssh")
         backup_ssh_to_ssh "$location"
+        pause_for_user
         ;;
     *)
         print_error "Unsupported protocol: $protocol"
+        pause_for_user
         return 1
         ;;
     esac
@@ -97,8 +101,18 @@ backup_ssh_to_smb() {
     # Create temporary archive
     tar -czf "$tmp_archive" -C "$CONFIG_DIR/backups" ssh
 
+    # Create each level of the directory structure
+    local current_path=""
+    for dir in ${path//\// }; do
+        current_path="${current_path}/${dir}"
+        smbclient "//${server}/${share}" -U "${username}%${password}" -c "mkdir \"${current_path}\"" 2>/dev/null || true
+    done
+
+    # Create the ssh_backup directory
+    smbclient "//${server}/${share}" -U "${username}%${password}" -c "mkdir \"${remote_path}\"" 2>/dev/null || true
+
     # Upload to SMB share
-    if ! smbclient "//${server}/${share}" -U "${username}%${password}" -c "mkdir ${remote_path}; put ${tmp_archive} ${remote_path}/ssh_backup.tar.gz"; then
+    if ! smbclient "//${server}/${share}" -U "${username}%${password}" -c "put ${tmp_archive} \"${remote_path}/ssh_backup.tar.gz\""; then
         print_error "Failed to upload backup to SMB share"
         rm -f "$tmp_archive"
         return 1
@@ -256,114 +270,29 @@ configure_network_ssh_backup() {
     manage_network_locations_menu
 
     if verify_network_config; then
-        read -p "Would you like to configure this as your preferred backup location? (Y/n): " configure_pref
-        if [[ ! "$configure_pref" =~ ^[Nn]$ ]]; then
-            configure_preferred_backup_location
-
-            if [ -n "$(get_preferred_location "ssh_backup")" ] && check_ssh_backup; then
-                read -p "Would you like to sync your local backup to the network now? (Y/n): " sync_now
-                if [[ ! "$sync_now" =~ ^[Nn]$ ]]; then
-                    backup_ssh_to_network
-                fi
+        local network_location
+        network_location=$(jq -r '.locations[] | select(.type == "ssh_backup")' "$NETWORK_CONFIG")
+        if [ -n "$network_location" ] && check_ssh_backup; then
+            read -p "Would you like to sync your local backup to the network now? (Y/n): " sync_now
+            if [[ ! "$sync_now" =~ ^[Nn]$ ]]; then
+                backup_ssh_to_network
             fi
         fi
     fi
 }
 
-###############################################################################
-# SSH Preferred Location Functions
-###############################################################################
-
-get_preferred_ssh_location() {
-    local location_type="$1" # e.g., "ssh_backup"
-    if [ -f "$CONFIG_DIR/preferred_locations.json" ]; then
-        jq -r --arg type "$location_type" '.[$type] // empty' "$CONFIG_DIR/preferred_locations.json"
-    fi
-}
-
-set_preferred_ssh_location() {
-    local location_type="$1"
-    local location_id="$2"
-    local config_file="$CONFIG_DIR/preferred_locations.json"
-
-    # Create or update the preferred locations file
-    if [ ! -f "$config_file" ]; then
-        echo "{}" >"$config_file"
-    fi
-
-    # Update the preferred location
-    jq --arg type "$location_type" --arg id "$location_id" \
-        '.[$type] = $id' "$config_file" >"${config_file}.tmp" &&
-        mv "${config_file}.tmp" "$config_file"
-}
-
-clear_preferred_ssh_location() {
-    local location_type="$1"
-    local config_file="$CONFIG_DIR/preferred_locations.json"
-
-    if [ -f "$config_file" ]; then
-        jq --arg type "$location_type" 'del(.[$type])' "$config_file" >"${config_file}.tmp" &&
-            mv "${config_file}.tmp" "$config_file"
-    fi
-}
-
-configure_preferred_ssh_backup_location() {
-    clear
-    echo "┌───────────────────────────────────────────────"
-    echo "│         Configure Preferred SSH Backup        "
-    echo "└───────────────────────────────────────────────"
-
-    local current_preferred
-    current_preferred=$(get_preferred_ssh_location "ssh_backup")
-
-    if [ -n "$current_preferred" ]; then
-        local current_label
-        current_label=$(get_location_label "$current_preferred")
-        echo "│ Current preferred location: $current_label"
-    else
-        echo "│ No preferred location set"
-    fi
-
-    echo "│"
-    echo "│ Options:"
-    echo "│ 1. Select new preferred location"
-    echo "│ 2. Clear preferred location"
-    echo "│ 3. Configure new network location"
-    echo "│ Q. Cancel"
-
-    read -p "Enter choice: " pref_choice
-
-    case $pref_choice in
-    1)
-        local location_id
-        if location_id=$(select_network_location_id); then
-            set_preferred_ssh_location "ssh_backup" "$location_id"
-            print_success "Preferred location updated"
-        fi
-        ;;
-    2)
-        clear_preferred_ssh_location "ssh_backup"
-        print_success "Preferred location cleared"
-        ;;
-    3)
-        manage_network_locations_menu
-        configure_preferred_ssh_backup_location # Recurse to allow selection after configuration
-        ;;
-    [qQ])
-        return
-        ;;
-    *)
-        print_error "Invalid choice"
-        ;;
-    esac
-    pause_for_user
-}
-
 check_network_ssh_backup_exists() {
     local location_id="$1"
     local location
-    location=$(get_network_location_by_id "$location_id")
-    if [ $? -ne 0 ]; then
+
+    # If no location_id provided, try to get the ssh_backup location
+    if [ -z "$location_id" ]; then
+        location=$(jq -r '.locations[] | select(.type == "ssh_backup")' "$NETWORK_CONFIG")
+    else
+        location=$(get_network_location_by_id "$location_id")
+    fi
+
+    if [ -z "$location" ] || [ "$location" = "null" ]; then
         return 1
     fi
 
@@ -372,11 +301,11 @@ check_network_ssh_backup_exists() {
 
     case "$protocol" in
     "smb")
-        check_smb_backup_exists "$location"
+        check_smb_ssh_backup_exists "$location"
         return $?
         ;;
     "ssh")
-        check_ssh_backup_exists "$location"
+        check_ssh_ssh_backup_exists "$location"
         return $?
         ;;
     *)
@@ -421,28 +350,34 @@ handle_ssh_backup_menu_choice() {
         2) restore_ssh ;;
         3)
             if [ "$has_network_location" = true ]; then
-                if [ "$has_network_backup" = true ]; then
-                    backup_ssh_to_network
-                else
+                local network_location
+                network_location=$(jq -r '.locations[] | select(.type == "ssh_backup")' "$NETWORK_CONFIG")
+                if [ -n "$network_location" ]; then
+                    local location_id
+                    location_id=$(echo "$network_location" | jq -r .location_id)
+                    # if [ "$has_network_backup" = true ]; then
+                    backup_ssh_to_network "$location_id"
+                    # else
                     # Initial network sync
-                    configure_preferred_ssh_backup_location
-                    local preferred_location_id=$(get_preferred_ssh_location "ssh_backup")
-                    if [ -n "$preferred_location_id" ]; then
-                        backup_ssh_to_network "$preferred_location_id"
-                    fi
+                    # backup_ssh_to_network "$location_id"
+                    # fi
+                else
+                    print_error "Failed to get network location"
+                    pause_for_user
                 fi
             else
                 configure_network_ssh_backup
             fi
             ;;
+
         4)
             if [ "$has_network_backup" = true ]; then
                 restore_ssh_from_network
             else
-                configure_preferred_ssh_backup_location
+                print_error "No network backup exists"
+                pause_for_user
             fi
             ;;
-        5) configure_preferred_ssh_backup_location ;;
         esac
     else
         case $choice in
@@ -450,6 +385,9 @@ handle_ssh_backup_menu_choice() {
         2)
             if [ "$has_network_location" = true ] && [ "$has_network_backup" = true ]; then
                 restore_ssh_from_network
+            else
+                print_error "No network backup exists"
+                pause_for_user
             fi
             ;;
         esac

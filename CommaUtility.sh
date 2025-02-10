@@ -73,9 +73,6 @@ readonly LAUNCH_ENV_FILE="/data/openpilot/launch_env.sh"
 
 # Backup Variables
 readonly SSH_BACKUP_DIR="$CONFIG_DIR/backups/ssh"
-# readonly BACKUP_BASE_DIR="/data/device_backup"
-# readonly BACKUP_METADATA_FILE="metadata.json"
-# readonly BACKUP_CHECKSUM_FILE="checksum.sha256"
 
 # Module Directory and Modules
 readonly MODULE_DIR="$CONFIG_DIR/modules"
@@ -368,7 +365,7 @@ check_prerequisites() {
     fi
 
     # Make sure important directories exist and are created
-    mkdir -p "$BACKUP_BASE_DIR" "$CONFIG_DIR" "$CREDENTIALS_DIR" "$TRANSFER_STATE_DIR"
+    mkdir -p "$CONFIG_DIR" "$CREDENTIALS_DIR" "$TRANSFER_STATE_DIR"
 
     return $errors
 }
