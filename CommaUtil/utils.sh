@@ -7,8 +7,8 @@
 #
 # This script contains utility functions for the device.
 ###############################################################################
-readonly UTILS_SCRIPT_VERSION="3.0.1"
-readonly UTILS_SCRIPT_MODIFIED="2025-02-09"
+readonly UTILS_SCRIPT_VERSION="3.0.0"
+readonly UTILS_SCRIPT_MODIFIED="2025-02-10"
 
 ###############################################################################
 # Encryption/Decryption Functions

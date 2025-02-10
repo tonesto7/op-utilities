@@ -7,8 +7,8 @@
 #
 # This script manages device status, controls, and statistics.
 ###############################################################################
-readonly DEVICE_SCRIPT_VERSION="3.0.1"
-readonly DEVICE_SCRIPT_MODIFIED="2025-02-09"
+readonly DEVICE_SCRIPT_VERSION="3.0.0"
+readonly DEVICE_SCRIPT_MODIFIED="2025-02-10"
 
 ###############################################################################
 # Boot & Logo Update Functions

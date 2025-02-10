@@ -7,8 +7,8 @@
 #
 # This script manages device route operations (concatenate, etc.)
 ###############################################################################
-readonly ROUTES_SCRIPT_VERSION="3.0.1"
-readonly ROUTES_SCRIPT_MODIFIED="2025-02-09"
+readonly ROUTES_SCRIPT_VERSION="3.0.0"
+readonly ROUTES_SCRIPT_MODIFIED="2025-02-10"
 
 # Routes Related Constants
 readonly ROUTES_DIR="/data/media/0/realdata"

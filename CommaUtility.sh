@@ -10,8 +10,8 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly SCRIPT_VERSION="3.0.1"
-readonly SCRIPT_MODIFIED="2025-02-08"
+readonly SCRIPT_VERSION="3.0.0"
+readonly SCRIPT_MODIFIED="2025-02-11"
 readonly SCRIPT_BRANCH="test"
 
 # We unify color-coded messages in a single block for consistency:
@@ -85,13 +85,16 @@ readonly MODULES=("backups.sh" "device.sh" "issues.sh" "jobs.sh" "network.sh" "r
 display_main_menu() {
     clear
     echo "┌────────────────────────────────────────────────────"
-    echo "│             CommaUtility Script v$SCRIPT_VERSION"
-    echo "│             (Last Modified: $SCRIPT_MODIFIED)"
+    echo "│             CommaUtility Script (v$SCRIPT_VERSION)"
+    echo "│                [Modified: $SCRIPT_MODIFIED]"
     echo "├────────────────────────────────────────────────────"
 
     display_os_info_short
+    echo "│"
     display_git_status_short
+    echo "│"
     display_disk_space_status_short
+    echo "│"
     display_ssh_status_short
 
     # Detect and categorize issues
@@ -102,6 +105,7 @@ display_main_menu() {
     for i in "${!ISSUE_PRIORITIES[@]}"; do
         if [ "${ISSUE_PRIORITIES[$i]}" -eq 1 ]; then
             if [ "$critical_found" = false ]; then
+                echo "│"
                 echo "├────────────────────────────────────────────────────"
                 echo -e "│ ${RED}Critical Issues:${NC}"
                 critical_found=true
@@ -115,6 +119,7 @@ display_main_menu() {
     for i in "${!ISSUE_PRIORITIES[@]}"; do
         if [ "${ISSUE_PRIORITIES[$i]}" -eq 2 ]; then
             if [ "$warnings_found" = false ]; then
+                echo "│"
                 echo "├────────────────────────────────────────────────────"
                 echo -e "│ ${YELLOW}Warnings:${NC}"
                 warnings_found=true
@@ -128,6 +133,7 @@ display_main_menu() {
     for i in "${!ISSUE_PRIORITIES[@]}"; do
         if [ "${ISSUE_PRIORITIES[$i]}" -eq 3 ]; then
             if [ "$recommendations_found" = false ]; then
+                echo "│"
                 echo "├────────────────────────────────────────────────────"
                 echo -e "│ ${BLUE}Recommendations:${NC}"
                 recommendations_found=true
@@ -271,76 +277,68 @@ function load_modules() {
     mkdir -p "$MODULE_DIR"
     local throttle_period=60
     local last_check_file="$CONFIG_DIR/module_update_last_check"
-    local current_time
-    current_time=$(date +%s)
-    local update_allowed=false
-
-    # Determine if update check is allowed (i.e. more than 60s since last check)
-    if [ -f "$last_check_file" ]; then
-        local last_check
-        last_check=$(cat "$last_check_file")
-        local diff=$((current_time - last_check))
-        if [ "$diff" -ge "$throttle_period" ]; then
-            update_allowed=true
-            echo "$current_time" >"$last_check_file"
-        fi
-    else
-        update_allowed=true
-        echo "$current_time" >"$last_check_file"
-    fi
+    local current_time=$(date +%s)
+    local check_updates=false
 
     # Transient message: loading modules
     echo -ne "│ Loading Modules...\r\033[K"
 
+    # Determine if update check is allowed
+    if [ ! -f "$last_check_file" ] || [ $((current_time - $(cat "$last_check_file" 2>/dev/null || echo 0))) -ge $throttle_period ]; then
+        check_updates=true
+        echo "$current_time" >"$last_check_file"
+    fi
+
     for module in "${MODULES[@]}"; do
-        # Generate uppercase module name (strip .sh)
-        module_var=$(echo "$module" | tr '[:lower:]' '[:upper:]' | sed 's/\.SH$//')
-        if [ ! -f "$MODULE_DIR/$module" ]; then
-            # Transient: module not found → downloading
-            echo -ne "│ Module [$module_var] Not Found. Downloading...\r\033[K"
-            if wget -q -O "$MODULE_DIR/$module" "https://raw.githubusercontent.com/tonesto7/op-utilities/$SCRIPT_BRANCH/CommaUtil/$module"; then
-                module_version=$(grep "^readonly ${module_var}_SCRIPT_VERSION=" "$MODULE_DIR/$module" | cut -d'"' -f2)
-                # Transient: download complete
-                echo -ne "│ Module [$module_var] Downloaded (v$module_version)\r\033[K"
-                chmod +x "$MODULE_DIR/$module"
-                source "$MODULE_DIR/$module"
-                echo "│ Module [$module_var] Up to Date (v$module_version)"
-            else
-                echo -e "${RED}| Failed to Download Module [$module_var]${NC}"
-                exit 1
-            fi
-        fi
-
-        if [ "$update_allowed" = true ]; then
-            echo -ne "│ Module [$module_var] Found. Checking for Updates...\r\033[K"
-            current_version=$(grep "^readonly ${module_var}_SCRIPT_VERSION=" "$MODULE_DIR/$module" | cut -d'"' -f2)
-            online_version=$(wget --timeout=10 -qO- "https://raw.githubusercontent.com/tonesto7/op-utilities/$SCRIPT_BRANCH/CommaUtil/$module" | grep "^readonly ${module_var}_SCRIPT_VERSION=" | cut -d'"' -f2)
-            if [ -n "$online_version" ]; then
-                cmp=$(compare_versions "$online_version" "$current_version")
-                if [ "$cmp" -eq 1 ]; then
-                    # Transient: update available
-                    echo -ne "│ Module [$module_var] Update Available (v$online_version). Updating...\r\033[K"
-                    if wget -q -O "$MODULE_DIR/$module" "https://raw.githubusercontent.com/tonesto7/op-utilities/$SCRIPT_BRANCH/CommaUtil/$module"; then
-                        chmod +x "$MODULE_DIR/$module"
-                        echo "│ Module [$module_var] Updated (v$online_version)"
-                    else
-                        echo -e "${RED}| Failed to Update Module [$module_var]${NC}"
-                        exit 1
-                    fi
-                else
-                    echo "│ Module [$module_var] Up to Date (v$current_version)"
-                fi
-            else
-                echo "│ Module [$module_var] Up to Date (v$current_version)"
-
-            fi
-        else
-            # Skip update check; simply load the existing module
-            current_version=$(grep "^readonly ${module_var}_SCRIPT_VERSION=" "$MODULE_DIR/$module" | cut -d'"' -f2)
-            echo "│ Module [$module_var] Loaded (v$current_version)"
-        fi
-        source "$MODULE_DIR/$module"
+        load_module "$module" "$check_updates" || exit 1
     done
+}
+
+function load_module() {
+    local module="$1"
+    local check_updates="$2"
+    local module_var=$(echo "$module" | tr '[:lower:]' '[:upper:]' | sed 's/\.SH$//')
+    local module_path="$MODULE_DIR/$module"
+
+    # Download if missing
+    if [ ! -f "$module_path" ]; then
+        # Transient: module not found → downloading
+        echo -ne "│ Module [$module_var] Not Found. Downloading...\r\033[K"
+        if ! wget -q -O "$module_path" "https://raw.githubusercontent.com/tonesto7/op-utilities/$SCRIPT_BRANCH/CommaUtil/$module"; then
+            echo -e "${RED}| Failed to Download Module [$module_var]${NC}"
+            return 1
+        fi
+        chmod +x "$module_path"
+        local version=$(grep "^readonly ${module_var}_SCRIPT_VERSION=" "$module_path" | cut -d'"' -f2)
+        echo "│ Module [$module_var] Downloaded (v$version)"
+    fi
+
+    # Check for updates if allowed
+    if [ "$check_updates" = "true" ]; then
+        echo -ne "│ Module [$module_var] Found. Checking for Updates...\r\033[K"
+        local current_version=$(grep "^readonly ${module_var}_SCRIPT_VERSION=" "$module_path" | cut -d'"' -f2)
+        local online_version=$(wget --timeout=10 -qO- "https://raw.githubusercontent.com/tonesto7/op-utilities/$SCRIPT_BRANCH/CommaUtil/$module" | grep "^readonly ${module_var}_SCRIPT_VERSION=" | cut -d'"' -f2)
+
+        if [ -n "$online_version" ] && [ "$online_version" != "$current_version" ]; then
+            echo -ne "│ Module [$module_var] Update Available (v$online_version). Updating...\r\033[K"
+            if ! wget -q -O "$module_path" "https://raw.githubusercontent.com/tonesto7/op-utilities/$SCRIPT_BRANCH/CommaUtil/$module"; then
+                echo -e "${RED}| Failed to Update Module [$module_var]${NC}"
+                return 1
+            fi
+            chmod +x "$module_path"
+            echo "│ Module [$module_var] Updated (v$online_version)"
+        else
+            echo "│ Module [$module_var] Up to Date (v$current_version)"
+        fi
+    else
+        # Skip update check; simply load the existing module
+        local current_version=$(grep "^readonly ${module_var}_SCRIPT_VERSION=" "$module_path" | cut -d'"' -f2)
+        echo "│ Module [$module_var] Loaded (v$current_version)"
+    fi
+
+    # Source the module
+    source "$module_path"
+    return 0
 }
 
 check_prerequisites() {

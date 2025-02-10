@@ -7,8 +7,8 @@
 #
 # This script contains helper functions for network operations.
 ###############################################################################
-readonly NETWORK_SCRIPT_VERSION="3.0.1"
-readonly NETWORK_SCRIPT_MODIFIED="2025-02-09"
+readonly NETWORK_SCRIPT_VERSION="3.0.0"
+readonly NETWORK_SCRIPT_MODIFIED="2025-02-10"
 
 ###############################################################################
 # Network Helper Functions

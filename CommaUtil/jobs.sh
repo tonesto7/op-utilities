@@ -7,8 +7,8 @@
 #
 # This script manages device jobs for CommaUtility.
 ###############################################################################
-readonly JOBS_SCRIPT_VERSION="3.0.1"
-readonly JOBS_SCRIPT_MODIFIED="2025-02-09"
+readonly JOBS_SCRIPT_VERSION="3.0.0"
+readonly JOBS_SCRIPT_MODIFIED="2025-02-10"
 
 ###############################################################################
 # Job Management Functions

@@ -8,8 +8,8 @@
 # This script manages device SSH operations (SSH key management, configuration,
 # and testing).
 ###############################################################################
-readonly SSH_SCRIPT_VERSION="3.0.1"
-readonly SSH_SCRIPT_MODIFIED="2025-02-09"
+readonly SSH_SCRIPT_VERSION="3.0.0"
+readonly SSH_SCRIPT_MODIFIED="2025-02-10"
 
 readonly SSH_HOME_DIR="/home/comma/.ssh"
 readonly SSH_USR_DEFAULT_DIR="/usr/default/home/comma/.ssh"
