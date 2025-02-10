@@ -158,6 +158,11 @@ display_os_info_short() {
         echo "│ ├─ AGNOS: Unknown"
     fi
 
+    echo "│ ├─ Dongle ID: $(get_dongle_id)"
+    echo "│ ├─ Serial Number: $(get_serial_number)"
+    echo "│ ├─ WiFi MAC Address: $(get_wifi_mac_address)"
+    echo "│ ├─ WiFi SSID: $(get_wifi_ssid)"
+
     if [ -f "$BOOT_IMG_BKP" ] && [ -f "$LOGO_IMG_BKP" ]; then
         echo -e "│ └─ Custom Boot/Logo: ${GREEN}Yes${NC}"
     else
@@ -240,8 +245,47 @@ shutdown_device() {
 }
 
 ###############################################################################
-# Device Control Functions
+# Device Information Functions
 ###############################################################################
+
+get_dongle_id() {
+    # print_info "Getting dongle ID..."
+    local dongle_id
+    dongle_id=$(cat /data/params/d/DongleId 2>/dev/null)
+    if [ -z "$dongle_id" ]; then
+        return "Unknown"
+    fi
+    echo "$dongle_id"
+}
+
+get_serial_number() {
+    # print_info "Getting serial number..."
+    local serial_number
+    serial_number=$(cat /data/params/d/HardwareSerial 2>/dev/null)
+    if [ -z "$serial_number" ]; then
+        return "Unknown"
+    fi
+    echo "$serial_number"
+}
+
+get_wifi_mac_address() {
+    # print_info "Getting WiFi MAC address..."
+    local wifi_mac_address
+    wifi_mac_address=$(cat /sys/class/net/wlan0/address 2>/dev/null)
+    echo "$wifi_mac_address"
+}
+
+get_wifi_ssid() {
+    # print_info "Getting WiFi SSID..."
+    local wifi_ssid
+    wifi_ssid=$(nmcli -t -f DEVICE,CONNECTION dev status | grep wifi | while IFS=: read -r dev conn; do
+        if [ "$conn" != "--" ]; then
+            echo "$conn"
+            break
+        fi
+    done)
+    echo "$wifi_ssid"
+}
 
 manage_wifi_networks() {
     clear
