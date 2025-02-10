@@ -571,9 +571,6 @@ fi
 # Main Execution
 ###############################################################################
 main() {
-    if [ -z "$SCRIPT_ACTION" ]; then
-        check_for_updates
-    fi
 
     while true; do
         if [ -z "$SCRIPT_ACTION" ]; then
