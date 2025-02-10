@@ -25,7 +25,7 @@ readonly BOOT_IMG_BKP="${BOOT_IMG}.backup"
 readonly LOGO_IMG_BKP="${LOGO_IMG}.backup"
 
 update_boot_and_logo() {
-    print_info "Mounting / and /data partitions as read-write for boot image update..."
+    print_info "Updating boot and logo images..."
     mount_partition_rw "/"
 
     # Ensure the original files exist before proceeding
