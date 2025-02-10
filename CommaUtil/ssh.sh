@@ -101,6 +101,7 @@ restore_ssh() {
 
             # Restore persist_comma directory if it exists in backup
             if [ -d "$SSH_BACKUP_DIR/persist_comma" ]; then
+
                 mkdir -p "$SSH_PERSIST_DIR"
                 cp -R "$SSH_BACKUP_DIR/persist_comma/." "$SSH_PERSIST_DIR/"
                 sudo chown comma:comma "$SSH_PERSIST_DIR" -R
@@ -114,6 +115,8 @@ restore_ssh() {
             restart_ssh_agent
 
             print_success "SSH files restored successfully."
+            # mount_partition_ro "/"
+            # mount_partition_ro "/persist"
         else
             print_info "Restore cancelled."
         fi
@@ -167,9 +170,16 @@ get_ssh_backup_metadata() {
         ssh_files=$(find "$SSH_BACKUP_DIR/.ssh" -type f | wc -l)
         persist_files=$(find "$SSH_BACKUP_DIR/persist_comma" -type f | wc -l)
 
+        local backup_date
+        backup_date=$(get_backup_date_from_metadata "$SSH_BACKUP_DIR/metadata.txt")
+
         echo "File Counts:"
         echo "- SSH files: $ssh_files"
         echo "- Persist files: $persist_files"
+
+        if [ -n "$backup_date" ]; then
+            echo "Last Backup: $backup_date"
+        fi
     else
         print_warning "No backup metadata found"
     fi
@@ -358,6 +368,30 @@ display_ssh_status() {
         backup_valid=false
     fi
 
+    echo "│"
+    echo "│ Network Backup Status:"
+    local network_location
+    network_location=$(jq -r '.locations[] | select(.type=="ssh_backup")' "$NETWORK_CONFIG")
+    if [ -n "$network_location" ] && [ "$network_location" != "null" ]; then
+        local location_label
+        location_label=$(echo "$network_location" | jq -r .label)
+        if check_network_ssh_backup_exists; then
+            local network_backup_date
+            network_backup_date=$(get_network_ssh_backup_date)
+            if [ -n "$network_backup_date" ]; then
+                local network_time_ago
+                network_time_ago=$(format_time_ago "$network_backup_date")
+                echo "│ └─ Last sync: $network_time_ago to $location_label"
+            else
+                echo "│ └─ Synced to $location_label"
+            fi
+        else
+            echo -e "│ └─ ${YELLOW}Not synced to $location_label${NC}"
+        fi
+    else
+        echo -e "│ └─ ${YELLOW}No network location configured${NC}"
+    fi
+
     # Add appropriate issues based on the specific problems found
     if [ "$home_valid" = false ]; then
         local issue_index=${#ISSUE_DESCRIPTIONS[@]}
@@ -453,6 +487,7 @@ create_ssh_config() {
 Host github.com
   AddKeysToAgent yes
   IdentityFile $SSH_HOME_DIR/github
+  IdentitiesOnly yes
   Hostname ssh.github.com
   Port 443
   User git
@@ -535,16 +570,27 @@ check_ssh_config_completeness() {
     local missing_keys=()
     grep -q "AddKeysToAgent yes" "$config_file" || missing_keys+=("AddKeysToAgent")
     grep -q "IdentityFile $SSH_HOME_DIR/github" "$config_file" || missing_keys+=("IdentityFile")
+    grep -q "IdentitiesOnly yes" "$config_file" || missing_keys+=("IdentitiesOnly")
     grep -q "Hostname ssh.github.com" "$config_file" || missing_keys+=("Hostname")
     grep -q "Port 443" "$config_file" || missing_keys+=("Port")
     grep -q "User git" "$config_file" || missing_keys+=("User")
 
     if [ ${#missing_keys[@]} -gt 0 ]; then
-        echo "Missing SSH config keys: ${missing_keys[*]}"
+        # echo "Missing SSH config keys: ${missing_keys[*]}"
         return 1
     fi
 
     return 0
+}
+
+update_ssh_config() {
+    clear
+    print_info "Updating SSH config..."
+    create_ssh_config
+    copy_ssh_config_and_keys
+    backup_ssh
+    print_success "SSH config updated successfully."
+    pause_for_user
 }
 
 change_github_ssh_port() {
@@ -647,11 +693,11 @@ repair_create_ssh() {
 
     echo "Checking home directory SSH files..."
     [ -f "$SSH_HOME_DIR/github" ] && [ -f "$SSH_HOME_DIR/github.pub" ] && [ -f "$SSH_HOME_DIR/config" ] && home_ssh_exists=true
-    echo "Home SSH files exist: $home_ssh_exists"
+    # echo "Home SSH files exist: $home_ssh_exists"
 
     echo "Checking persistent storage SSH files..."
     [ -f "$SSH_USR_DEFAULT_DIR/github" ] && [ -f "$SSH_USR_DEFAULT_DIR/github.pub" ] && [ -f "$SSH_USR_DEFAULT_DIR/config" ] && usr_ssh_exists=true
-    echo "Persistent storage SSH files exist: $usr_ssh_exists"
+    # echo "Persistent storage SSH files exist: $usr_ssh_exists"
 
     # Check authentication if home files exist
     if [ "$home_ssh_exists" = true ]; then
@@ -670,9 +716,9 @@ repair_create_ssh() {
         print_error "SSH files exist but authentication is failing."
         echo "Would you like to:"
         echo "1. Reset SSH keys (removes existing keys and creates new ones)"
-        echo "2. Change GitHub SSH port to 443 (if behind firewall)"
-        echo "3. Cancel"
-        read -p "Enter choice (1-3): " auth_fix_choice
+        echo "2. Update SSH config (if config is incomplete)"
+        echo "Q. Cancel"
+        read -p "Enter choice (1-2, Q): " auth_fix_choice
 
         case $auth_fix_choice in
         1)
@@ -680,10 +726,10 @@ repair_create_ssh() {
             return 0
             ;;
         2)
-            change_github_ssh_port
+            update_ssh_config
             return 0
             ;;
-        3)
+        [qQ])
             print_info "Operation cancelled."
             return 0
             ;;
@@ -756,15 +802,25 @@ reset_ssh() {
 }
 
 copy_ssh_config_and_keys() {
-    mount_rw
-    print_info "Copying SSH config and keys to persistent storage..."
+    echo "Mounting persistent storage..."
+    mount_partition_rw "/"
+    print_info "Copying SSH config and keys..."
 
     # Copy to /usr/default/home/comma/.ssh/
     if [ ! -d "$SSH_USR_DEFAULT_DIR" ]; then
         sudo mkdir -p "$SSH_USR_DEFAULT_DIR"
     fi
-    sudo cp "$SSH_HOME_DIR/config" "$SSH_USR_DEFAULT_DIR/"
-    sudo cp "$SSH_HOME_DIR/github*" "$SSH_USR_DEFAULT_DIR/"
+    sudo rm -f "$SSH_USR_DEFAULT_DIR/config" "$SSH_USR_DEFAULT_DIR/github" "$SSH_USR_DEFAULT_DIR/github.pub"
+    sudo cp "$SSH_HOME_DIR/config" "$SSH_HOME_DIR/github" "$SSH_HOME_DIR/github.pub" "$SSH_USR_DEFAULT_DIR/"
+
+    # Verify files were copied
+    files=("$SSH_USR_DEFAULT_DIR/config" "$SSH_USR_DEFAULT_DIR/github" "$SSH_USR_DEFAULT_DIR/github.pub")
+    for file in "${files[@]}"; do
+        if [ ! -f "$file" ]; then
+            print_error "Failed to copy $file"
+            return 1
+        fi
+    done
 
     # Set permissions
     sudo chown comma:comma "$SSH_USR_DEFAULT_DIR" -R
@@ -792,8 +848,14 @@ view_ssh_public_key() {
     if [ -f "$SSH_HOME_DIR/github.pub" ]; then
         local ssh_key
         ssh_key=$(cat "$SSH_HOME_DIR/github.pub")
-        echo "SSH public key"
-        echo "─────────────(Copy the text between these lines)─────────────"
+        echo "─────────────────────────────────────────────────────────────"
+        echo "│                      SSH Public Key"
+        echo "─────────────────────────────────────────────────────────────"
+        echo "│ Please add this key to your GitHub account using the"
+        echo "│ following link: https://github.com/settings/ssh/new"
+        echo "│ "
+        echo "│ SSH Public Key:"
+        echo "─────────────────────────────────────────────────────────────"
         echo -e "${GREEN}$ssh_key${NC}"
         echo "─────────────────────────────────────────────────────────────"
         echo ""
@@ -808,7 +870,8 @@ view_ssh_public_key() {
 
 remove_ssh_contents() {
     clear
-    mount_rw
+    mount_partition_rw "/"
+    mount_partition_rw "/persist"
     print_info "Removing SSH folder contents..."
 
     # Remove home .ssh contents
@@ -921,7 +984,7 @@ ssh_menu() {
         echo "│ 4. Reset SSH setup and recreate keys"
         echo "│ 5. Test SSH connection"
         echo "│ 6. View SSH key"
-        echo "│ 7. Change Github SSH port to 443"
+        echo "│ 7. Update SSH config (to ensure it's complete)"
         echo "│"
         echo "│ Backup/Restore Options:"
 
@@ -972,7 +1035,7 @@ ssh_menu() {
         6)
             view_ssh_public_key
             ;;
-        7) change_github_ssh_port ;;
+        7) update_ssh_config ;;
         *)
             if [ "$choice" -gt 7 ] && [ "$choice" -le "$option_count" ]; then
                 local relative_choice=$((choice - backup_option_start))

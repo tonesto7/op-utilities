@@ -269,6 +269,25 @@ function update_main_script() {
 
 function load_modules() {
     mkdir -p "$MODULE_DIR"
+    local throttle_period=60
+    local last_check_file="$CONFIG_DIR/module_update_last_check"
+    local current_time
+    current_time=$(date +%s)
+    local update_allowed=false
+
+    # Determine if update check is allowed (i.e. more than 60s since last check)
+    if [ -f "$last_check_file" ]; then
+        local last_check
+        last_check=$(cat "$last_check_file")
+        local diff=$((current_time - last_check))
+        if [ "$diff" -ge "$throttle_period" ]; then
+            update_allowed=true
+            echo "$current_time" >"$last_check_file"
+        fi
+    else
+        update_allowed=true
+        echo "$current_time" >"$last_check_file"
+    fi
 
     # Transient message: loading modules
     echo -ne "│ Loading Modules...\r\033[K"
@@ -290,8 +309,9 @@ function load_modules() {
                 echo -e "${RED}| Failed to Download Module [$module_var]${NC}"
                 exit 1
             fi
-        else
-            # Transient: module found, checking for updates
+        fi
+
+        if [ "$update_allowed" = true ]; then
             echo -ne "│ Module [$module_var] Found. Checking for Updates...\r\033[K"
             current_version=$(grep "^readonly ${module_var}_SCRIPT_VERSION=" "$MODULE_DIR/$module" | cut -d'"' -f2)
             online_version=$(wget --timeout=10 -qO- "https://raw.githubusercontent.com/tonesto7/op-utilities/$SCRIPT_BRANCH/CommaUtil/$module" | grep "^readonly ${module_var}_SCRIPT_VERSION=" | cut -d'"' -f2)
@@ -302,7 +322,6 @@ function load_modules() {
                     echo -ne "│ Module [$module_var] Update Available (v$online_version). Updating...\r\033[K"
                     if wget -q -O "$MODULE_DIR/$module" "https://raw.githubusercontent.com/tonesto7/op-utilities/$SCRIPT_BRANCH/CommaUtil/$module"; then
                         chmod +x "$MODULE_DIR/$module"
-                        source "$MODULE_DIR/$module"
                         echo "│ Module [$module_var] Updated (v$online_version)"
                     else
                         echo -e "${RED}| Failed to Update Module [$module_var]${NC}"
@@ -310,13 +329,17 @@ function load_modules() {
                     fi
                 else
                     echo "│ Module [$module_var] Up to Date (v$current_version)"
-                    source "$MODULE_DIR/$module"
                 fi
             else
                 echo "│ Module [$module_var] Up to Date (v$current_version)"
-                source "$MODULE_DIR/$module"
+
             fi
+        else
+            # Skip update check; simply load the existing module
+            current_version=$(grep "^readonly ${module_var}_SCRIPT_VERSION=" "$MODULE_DIR/$module" | cut -d'"' -f2)
+            echo "│ Module [$module_var] Loaded (v$current_version)"
         fi
+        source "$MODULE_DIR/$module"
     done
 }
 
@@ -547,7 +570,6 @@ parse_arguments() {
             NEW_BRANCH="$2"
             shift 2
             ;;
-
         # Help
         -h | --help)
             show_help

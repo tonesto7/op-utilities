@@ -79,6 +79,15 @@ detect_issues() {
         ISSUE_PRIORITIES[$issues_found]=2
     fi
 
+    if [ -f "$SSH_HOME_DIR/config" ]; then
+        if ! check_ssh_config_completeness; then
+            issues_found=$((issues_found + 1))
+            ISSUE_FIXES[$issues_found]="update_ssh_config"
+            ISSUE_DESCRIPTIONS[$issues_found]="SSH config is incomplete or missing required settings"
+            ISSUE_PRIORITIES[$issues_found]=1
+        fi
+    fi
+
     if [ "$permissions_valid" = false ]; then
         issues_found=$((issues_found + 1))
         ISSUE_FIXES[$issues_found]="fix_ssh_permissions"

@@ -24,13 +24,9 @@ readonly BLUEPILOT_LOGO_IMG="/data/openpilot/selfdrive/assets/img_bluepilot_logo
 readonly BOOT_IMG_BKP="${BOOT_IMG}.backup"
 readonly LOGO_IMG_BKP="${LOGO_IMG}.backup"
 
-mount_rw_boot_logo() {
-    print_info "Mounting / partition as read-write for boot image update..."
-    sudo mount -o remount,rw /
-}
-
 update_boot_and_logo() {
-    mount_rw_boot_logo
+    print_info "Mounting / and /data partitions as read-write for boot image update..."
+    mount_partition_rw "/"
 
     # Ensure the original files exist before proceeding
     if [ ! -f "$BOOT_IMG" ]; then
@@ -75,11 +71,12 @@ update_boot_and_logo() {
     sudo cp "$BLUEPILOT_BOOT_IMG" "$BOOT_IMG"
     sudo cp "$BLUEPILOT_LOGO_IMG" "$LOGO_IMG"
     print_success "Boot and logo images updated with BluePilot files."
+    mount_partition_ro "/"
     pause_for_user
 }
 
 restore_boot_and_logo() {
-    mount_rw_boot_logo
+    mount_partition_rw "/"
 
     # Check if backups exist before attempting restoration
     if [ ! -f "$BOOT_IMG_BKP" ]; then
@@ -102,6 +99,7 @@ restore_boot_and_logo() {
     sudo rm -f "$LOGO_IMG_BKP"
 
     print_success "Boot and logo images restored from backup."
+    mount_partition_ro "/"
     pause_for_user
 }
 

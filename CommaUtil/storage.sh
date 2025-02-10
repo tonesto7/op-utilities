@@ -125,7 +125,14 @@ check_root_space() {
     resize_root_if_needed "$usage"
 }
 
-mount_rw() {
-    print_info "Mounting the / partition as read-write..."
-    sudo mount -o remount,rw /
+mount_partition_rw() {
+    local partition="$1"
+    print_info "Mounting the $partition partition as read-write..."
+    sudo mount -o remount,rw "$partition"
+}
+
+mount_partition_ro() {
+    local partition="$1"
+    print_info "Mounting the $partition partition as read-only..."
+    sudo mount -o remount,ro "$partition"
 }

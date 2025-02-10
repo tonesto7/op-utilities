@@ -33,12 +33,12 @@ backup_ssh_to_network() {
             read -p "Would you like to configure a network location now? (y/N): " setup_choice
             if [[ "$setup_choice" =~ ^[Yy]$ ]]; then
                 manage_network_locations_menu
-                location_id=$(select_network_location_id)
+                location_id=$(select_network_location_id "ssh_backup")
             else
                 return 1
             fi
         else
-            location_id=$(select_network_location_id)
+            location_id=$(select_network_location_id "ssh_backup")
         fi
     fi
 
@@ -97,9 +97,13 @@ backup_ssh_to_smb() {
 
     local remote_path="$path/ssh_backup"
     local tmp_archive="/tmp/ssh_backup.tar.gz"
+    local tmp_metadata="/tmp/metadata.txt"
 
     # Create temporary archive
     tar -czf "$tmp_archive" -C "$CONFIG_DIR/backups" ssh
+
+    # Copy metadata file to temp
+    cp "$SSH_BACKUP_DIR/metadata.txt" "$tmp_metadata"
 
     # Create each level of the directory structure
     local current_path=""
@@ -111,14 +115,18 @@ backup_ssh_to_smb() {
     # Create the ssh_backup directory
     smbclient "//${server}/${share}" -U "${username}%${password}" -c "mkdir \"${remote_path}\"" 2>/dev/null || true
 
-    # Upload to SMB share
+    # Upload both files to SMB share
     if ! smbclient "//${server}/${share}" -U "${username}%${password}" -c "put ${tmp_archive} \"${remote_path}/ssh_backup.tar.gz\""; then
         print_error "Failed to upload backup to SMB share"
-        rm -f "$tmp_archive"
+        rm -f "$tmp_archive" "$tmp_metadata"
         return 1
     fi
 
-    rm -f "$tmp_archive"
+    if ! smbclient "//${server}/${share}" -U "${username}%${password}" -c "put ${tmp_metadata} \"${remote_path}/metadata.txt\""; then
+        print_warning "Failed to upload metadata file to SMB share"
+    fi
+
+    rm -f "$tmp_archive" "$tmp_metadata"
     print_success "SSH backup uploaded to network location"
     return 0
 }
@@ -133,19 +141,26 @@ backup_ssh_to_ssh() {
     auth_type=$(echo "$location" | jq -r .auth_type)
 
     local tmp_archive="/tmp/ssh_backup.tar.gz"
+    local tmp_metadata="/tmp/metadata.txt"
+
     tar -czf "$tmp_archive" -C "$CONFIG_DIR/backups" ssh
+    cp "$SSH_BACKUP_DIR/metadata.txt" "$tmp_metadata"
 
     if [ "$auth_type" = "password" ]; then
         local password
         password=$(decrypt_credentials "$(echo "$location" | jq -r .credential_file)")
-        sshpass -p "$password" scp -P "$port" "$tmp_archive" "${username}@${server}:${path}/ssh_backup.tar.gz"
+        sshpass -p "$password" ssh -p "$port" "${username}@${server}" "mkdir -p ${path}/ssh_backup"
+        sshpass -p "$password" scp -P "$port" "$tmp_archive" "${username}@${server}:${path}/ssh_backup/ssh_backup.tar.gz"
+        sshpass -p "$password" scp -P "$port" "$tmp_metadata" "${username}@${server}:${path}/ssh_backup/metadata.txt"
     else
         local key_path
         key_path=$(echo "$location" | jq -r .key_path)
-        scp -i "$key_path" -P "$port" "$tmp_archive" "${username}@${server}:${path}/ssh_backup.tar.gz"
+        ssh -i "$key_path" -p "$port" "${username}@${server}" "mkdir -p ${path}/ssh_backup"
+        scp -i "$key_path" -P "$port" "$tmp_archive" "${username}@${server}:${path}/ssh_backup/ssh_backup.tar.gz"
+        scp -i "$key_path" -P "$port" "$tmp_metadata" "${username}@${server}:${path}/ssh_backup/metadata.txt"
     fi
 
-    rm -f "$tmp_archive"
+    rm -f "$tmp_archive" "$tmp_metadata"
     print_success "SSH backup uploaded to network location"
     return 0
 }
@@ -160,12 +175,12 @@ restore_ssh_from_network() {
             read -p "Would you like to configure a network location now? (y/N): " setup_choice
             if [[ "$setup_choice" =~ ^[Yy]$ ]]; then
                 manage_network_locations_menu
-                location_id=$(select_network_location_id)
+                location_id=$(select_network_location_id "ssh_backup")
             else
                 return 1
             fi
         else
-            location_id=$(select_network_location_id)
+            location_id=$(select_network_location_id "ssh_backup")
         fi
     fi
 
@@ -314,28 +329,100 @@ check_network_ssh_backup_exists() {
     esac
 }
 
+get_backup_date_from_metadata() {
+    local metadata_file="$1"
+    if [ -f "$metadata_file" ]; then
+        local backup_date
+        backup_date=$(grep "Backup Date:" "$metadata_file" | cut -d: -f2- | xargs)
+        echo "$backup_date"
+        return 0
+    fi
+    return 1
+}
+
 get_network_ssh_backup_date() {
     local location_id="$1"
     local location
-    location=$(get_network_location_by_id "$location_id")
-    if [ $? -ne 0 ]; then
+
+    # If no location_id provided, try to get the ssh_backup location
+    if [ -z "$location_id" ]; then
+        location=$(jq -r '.locations[] | select(.type == "ssh_backup")' "$NETWORK_CONFIG")
+    else
+        location=$(get_network_location_by_id "$location_id")
+    fi
+
+    if [ -z "$location" ] || [ "$location" = "null" ]; then
         return 1
     fi
 
     local protocol
     protocol=$(echo "$location" | jq -r .protocol)
+    local tmp_file="/tmp/metadata.txt"
 
     case "$protocol" in
     "smb")
-        get_smb_ssh_backup_date "$location"
+        # Download metadata file from SMB share
+        if ! download_smb_metadata "$location" "$tmp_file"; then
+            return 1
+        fi
         ;;
     "ssh")
-        get_ssh_ssh_backup_date "$location"
-        ;;
-    *)
-        echo ""
+        # Download metadata file from SSH location
+        if ! download_ssh_metadata "$location" "$tmp_file"; then
+            return 1
+        fi
         ;;
     esac
+
+    if [ -f "$tmp_file" ]; then
+        get_backup_date_from_metadata "$tmp_file"
+        rm -f "$tmp_file"
+        return 0
+    fi
+    return 1
+}
+
+download_smb_metadata() {
+    local location="$1"
+    local output_file="$2"
+    local server share username path password
+
+    server=$(echo "$location" | jq -r .server)
+    share=$(echo "$location" | jq -r .share)
+    username=$(echo "$location" | jq -r .username)
+    path=$(echo "$location" | jq -r .path)
+    password=$(decrypt_credentials "$(echo "$location" | jq -r .credential_file)")
+
+    if [ -z "$password" ]; then
+        return 1
+    fi
+
+    smbclient "//${server}/${share}" -U "${username}%${password}" \
+        -c "get ${path}/ssh_backup/metadata.txt ${output_file}" >/dev/null 2>&1
+}
+
+download_ssh_metadata() {
+    local location="$1"
+    local output_file="$2"
+    local server port username path auth_type
+
+    server=$(echo "$location" | jq -r .server)
+    port=$(echo "$location" | jq -r .port)
+    username=$(echo "$location" | jq -r .username)
+    path=$(echo "$location" | jq -r .path)
+    auth_type=$(echo "$location" | jq -r .auth_type)
+
+    if [ "$auth_type" = "password" ]; then
+        local password
+        password=$(decrypt_credentials "$(echo "$location" | jq -r .credential_file)")
+        sshpass -p "$password" scp -P "$port" \
+            "${username}@${server}:${path}/ssh_backup/metadata.txt" "$output_file" >/dev/null 2>&1
+    else
+        local key_path
+        key_path=$(echo "$location" | jq -r .key_path)
+        scp -i "$key_path" -P "$port" \
+            "${username}@${server}:${path}/ssh_backup/metadata.txt" "$output_file" >/dev/null 2>&1
+    fi
 }
 
 handle_ssh_backup_menu_choice() {
@@ -355,12 +442,8 @@ handle_ssh_backup_menu_choice() {
                 if [ -n "$network_location" ]; then
                     local location_id
                     location_id=$(echo "$network_location" | jq -r .location_id)
-                    # if [ "$has_network_backup" = true ]; then
                     backup_ssh_to_network "$location_id"
-                    # else
-                    # Initial network sync
-                    # backup_ssh_to_network "$location_id"
-                    # fi
+
                 else
                     print_error "Failed to get network location"
                     pause_for_user
