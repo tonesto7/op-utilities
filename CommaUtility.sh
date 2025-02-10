@@ -76,7 +76,7 @@ readonly SSH_BACKUP_DIR="$CONFIG_DIR/backups/ssh"
 
 # Module Directory and Modules
 readonly MODULE_DIR="$CONFIG_DIR/modules"
-readonly MODULES=("backups.sh" "device.sh" "issues.sh" "jobs.sh" "network.sh" "repo.sh" "routes.sh" "ssh.sh" "storage.sh" "transfers.sh" "utils.sh")
+readonly MODULES=("backups.sh" "device.sh" "issues.sh" "jobs.sh" "network.sh" "repo.sh" "routes.sh" "service.sh" "ssh.sh" "storage.sh" "transfers.sh" "utils.sh")
 
 ###############################################################################
 # Main Menu
@@ -451,6 +451,9 @@ Service Operations:
   --restart-service <service>       Restart specified service
   --update-route-sync              Update route sync service configuration
     --network <location_id>        Network location ID for sync
+    --retention-days <days>        Days to keep routes after sync (1-90)
+    --auto-concat <true/false>     Auto concatenate routes before sync
+    --startup-delay <seconds>      Delay before starting sync (0-3600)
 
 General:
   -h, --help                        Show this help message

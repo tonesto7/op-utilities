@@ -32,8 +32,10 @@ create_route_sync_service() {
         fi
     fi
 
+    mount_partition_rw "/"
+
     # Create service file with all parameters
-    cat >"$service_path" <<EOF
+    sudo cat >"$service_path" <<EOF
 [Unit]
 Description=Comma Route Sync Service
 After=network-online.target
@@ -64,10 +66,12 @@ WantedBy=multi-user.target
 EOF
 
     # Set correct permissions
-    chmod 644 "$service_path"
+    sudo chmod 644 "$service_path"
 
     # Reload systemd daemon
-    systemctl daemon-reload
+    sudo systemctl daemon-reload
+
+    mount_partition_ro "/"
 }
 
 get_service_config() {
@@ -108,13 +112,13 @@ update_service() {
     local location_id="$1"
 
     if check_service_active "$ROUTE_SYNC_SERVICE"; then
-        systemctl stop "$ROUTE_SYNC_SERVICE"
+        sudo systemctl stop "$ROUTE_SYNC_SERVICE"
     fi
 
     create_route_sync_service "$location_id"
 
-    if systemctl is-enabled "$ROUTE_SYNC_SERVICE" >/dev/null 2>&1; then
-        systemctl start "$ROUTE_SYNC_SERVICE"
+    if sudo systemctl is-enabled "$ROUTE_SYNC_SERVICE" >/dev/null 2>&1; then
+        sudo systemctl start "$ROUTE_SYNC_SERVICE"
     fi
 }
 
@@ -125,25 +129,25 @@ enable_route_sync_service() {
         create_route_sync_service "$location_id"
     fi
 
-    systemctl enable "$ROUTE_SYNC_SERVICE"
-    systemctl start "$ROUTE_SYNC_SERVICE"
+    sudo systemctl enable "$ROUTE_SYNC_SERVICE"
+    sudo systemctl start "$ROUTE_SYNC_SERVICE"
     print_success "Route sync service enabled and started"
 }
 
 disable_route_sync_service() {
-    systemctl stop "$ROUTE_SYNC_SERVICE"
-    systemctl disable "$ROUTE_SYNC_SERVICE"
+    sudo systemctl stop "$ROUTE_SYNC_SERVICE"
+    sudo systemctl disable "$ROUTE_SYNC_SERVICE"
     print_success "Route sync service disabled and stopped"
 }
 
 get_service_status() {
     local service_name="$1"
-    systemctl status "$service_name"
+    sudo systemctl status "$service_name"
 }
 
 restart_service() {
     local service_name="$1"
-    systemctl restart "$service_name"
+    sudo systemctl restart "$service_name"
 }
 
 check_service_exists() {
@@ -153,7 +157,7 @@ check_service_exists() {
 
 check_service_active() {
     local service_name="$1"
-    systemctl is-active "$service_name" >/dev/null 2>&1
+    sudo systemctl is-active "$service_name" >/dev/null 2>&1
 }
 
 display_service_status() {
