@@ -700,6 +700,16 @@ select_network_location() {
     fi
 }
 
+get_network_backup_path() {
+    local base_path="$1"
+    local dongle_id=$(get_dongle_id)
+    if [ -n "$dongle_id" ]; then
+        echo "${base_path}/${dongle_id}"
+    else
+        echo "$base_path"
+    fi
+}
+
 ###############################################################################
 # Route Sync Job Management
 ###############################################################################

@@ -95,7 +95,8 @@ backup_ssh_to_smb() {
         return 1
     fi
 
-    local remote_path="$path/ssh_backup"
+    # Get dongle-specific backup path
+    local remote_path=$(get_network_backup_path "$path/ssh_backup")
     local tmp_archive="/tmp/ssh_backup.tar.gz"
     local tmp_metadata="/tmp/metadata.txt"
 
@@ -107,7 +108,7 @@ backup_ssh_to_smb() {
 
     # Create each level of the directory structure
     local current_path=""
-    for dir in ${path//\// }; do
+    for dir in ${remote_path//\// }; do
         current_path="${current_path}/${dir}"
         smbclient "//${server}/${share}" -U "${username}%${password}" -c "mkdir \"${current_path}\"" 2>/dev/null || true
     done

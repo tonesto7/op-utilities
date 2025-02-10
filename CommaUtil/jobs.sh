@@ -503,8 +503,10 @@ sync_route_to_smb() {
         return 1
     fi
 
+    # Get dongle-specific backup path
+    local remote_path=$(get_network_backup_path "$path/routes/$route_base")
+
     # Create remote directory structure
-    local remote_path="$path/routes/$route_base"
     smbclient "//${server}/${share}" -U "${username}%${password}" -c "mkdir \"${remote_path}\"" 2>/dev/null
 
     # Upload files
@@ -532,7 +534,8 @@ sync_route_to_ssh() {
     path=$(echo "$location" | jq -r .path)
     auth_type=$(echo "$location" | jq -r .auth_type)
 
-    local remote_path="$path/routes/$route_base"
+    # Get dongle-specific backup path
+    local remote_path=$(get_network_backup_path "$path/routes/$route_base")
 
     # Create remote directory
     if [ "$auth_type" = "password" ]; then
