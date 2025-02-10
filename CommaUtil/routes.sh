@@ -591,10 +591,9 @@ route_sync_menu() {
         echo "├───────────────────────────────────────────────"
 
         # Display current network location
-        local network_location
+        local network_location protocol label
         network_location=$(jq -r '.locations[] | select(.type == "route_backup")' "$NETWORK_CONFIG")
         if [ -n "$network_location" ]; then
-            local protocol label
             protocol=$(echo "$network_location" | jq -r .protocol)
             label=$(echo "$network_location" | jq -r .label)
             echo -e "│ Network Location: ${GREEN}$label ($protocol)${NC}"
@@ -612,11 +611,14 @@ route_sync_menu() {
 
         # Display current settings
         echo "│"
+        echo "│ • Startup Delay: The number of seconds to wait before starting the sync job."
+        echo "│ • Retention Period: The number of days to keep the local route om the device if it's been synced."
+        echo "│ • Auto Concatenate: Whether to concatenate the route segments before syncing."
+        echo "│"
         echo "│ Current Settings:"
         echo "│ • Startup Delay: $(get_route_sync_setting "startup_delay") seconds"
         echo "│ • Retention Period: $(get_route_sync_setting "retention_days") days"
         echo "│ • Auto Concatenate: $(get_route_sync_setting "auto_concat")"
-
         echo "│"
         echo "│ Available Options:"
         echo "│ 1. Configure Network Location"
@@ -656,7 +658,7 @@ route_sync_menu() {
             ;;
         4)
             if [ -n "$network_location" ]; then
-                verify_network_connectivity "route_backup" "$network_location"
+                verify_network_connectivity "$protocol" "$network_location"
             else
                 print_error "No network location configured"
             fi

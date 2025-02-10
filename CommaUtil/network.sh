@@ -540,6 +540,12 @@ remove_network_location() {
         fi
 
         print_success "$type_label location removed."
+        if [ "$location_type" = "route_backup" ]; then
+            if check_service_exists "$ROUTE_SYNC_SERVICE"; then
+                print_info "Disabling route sync service..."
+                disable_route_sync_service
+            fi
+        fi
     else
         print_info "Removal cancelled."
     fi
@@ -634,9 +640,23 @@ configure_network_location() {
     case $protocol_choice in
     1)
         add_smb_location "$location_type"
+        # After successfully configuring location
+        if [ "$location_type" = "route_backup" ]; then
+            if [ "$(get_route_sync_setting "enabled")" = "true" ] && service_needs_update; then
+                print_info "Updating route sync service with new location..."
+                update_service
+            fi
+        fi
         ;;
     2)
         add_ssh_location "$location_type"
+        # After successfully configuring location
+        if [ "$location_type" = "route_backup" ]; then
+            if [ "$(get_route_sync_setting "enabled")" = "true" ] && service_needs_update; then
+                print_info "Updating route sync service with new location..."
+                update_service
+            fi
+        fi
         ;;
     [qQ])
         return

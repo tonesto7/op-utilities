@@ -159,4 +159,41 @@ detect_issues() {
             fi
         fi
     fi
+
+    ###############################################################################
+    # Systemd Checks
+    ###############################################################################
+    if ! command -v systemctl >/dev/null 2>&1; then
+        echo -e "│ ${RED}systemd not available${NC}"
+        errors=$((errors + 1))
+    fi
+
+    # Check systemd service directory
+    if [ ! -d "$SYSTEMD_SERVICE_DIR" ]; then
+        echo -e "│ ${RED}systemd service directory not found${NC}"
+        errors=$((errors + 1))
+    fi
+
+    ###############################################################################
+    # Route Sync Checks
+    ###############################################################################
+    if [ "$(get_route_sync_setting "enabled")" = "true" ]; then
+        if ! check_service_exists "$ROUTE_SYNC_SERVICE"; then
+            issues_found=$((issues_found + 1))
+            ISSUE_FIXES[$issues_found]="configure_route_sync_job"
+            ISSUE_DESCRIPTIONS[$issues_found]="Route sync service not installed"
+            ISSUE_PRIORITIES[$issues_found]=2
+        elif ! check_service_active "$ROUTE_SYNC_SERVICE"; then
+            issues_found=$((issues_found + 1))
+            ISSUE_FIXES[$issues_found]="enable_route_sync_service"
+            ISSUE_DESCRIPTIONS[$issues_found]="Route sync service inactive"
+            ISSUE_PRIORITIES[$issues_found]=2
+        elif service_needs_update; then
+            issues_found=$((issues_found + 1))
+            ISSUE_FIXES[$issues_found]="update_service"
+            ISSUE_DESCRIPTIONS[$issues_found]="Route sync service needs configuration update"
+            ISSUE_PRIORITIES[$issues_found]=3
+        fi
+    fi
+
 }

@@ -67,7 +67,7 @@ remove_job_block() {
 ###############################################################################
 
 # Constants for route sync settings
-readonly DEFAULT_STARTUP_DELAY=300
+readonly DEFAULT_STARTUP_DELAY=60
 readonly DEFAULT_RETENTION_DAYS=30
 readonly DEFAULT_AUTO_CONCAT=true
 
@@ -79,12 +79,15 @@ display_sync_status() {
     echo "│            Route Sync Status Report          "
     echo "├───────────────────────────────────────────────"
 
+    # First display systemd service status
+    display_service_status
+
     # Check if sync is enabled
     local sync_enabled=$(get_route_sync_setting "enabled")
     if [ "$sync_enabled" = "true" ]; then
-        echo -e "│ Status: ${GREEN}Enabled${NC}"
+        echo -e "│ Sync Status: ${GREEN}Enabled${NC}"
     else
-        echo -e "│ Status: ${RED}Disabled${NC}"
+        echo -e "│ Sync Status: ${RED}Disabled${NC}"
     fi
 
     # Display settings
@@ -93,22 +96,6 @@ display_sync_status() {
     echo "│ • Startup Delay: $(get_route_sync_setting "startup_delay") seconds"
     echo "│ • Retention Period: $(get_route_sync_setting "retention_days") days"
     echo "│ • Auto Concatenate: $(get_route_sync_setting "auto_concat")"
-
-    # Display network location info
-    local network_location
-    network_location=$(jq -r '.locations[] | select(.type == "route_backup")' "$NETWORK_CONFIG")
-    if [ -n "$network_location" ]; then
-        local protocol label
-        protocol=$(echo "$network_location" | jq -r .protocol)
-        label=$(echo "$network_location" | jq -r .label)
-        echo "│"
-        echo "│ Network Location:"
-        echo "│ • Location: $label"
-        echo "│ • Protocol: $protocol"
-    else
-        echo "│"
-        echo -e "│ ${RED}No network location configured${NC}"
-    fi
 
     # Display sync statistics
     if [ -f "$status_file" ]; then
@@ -214,8 +201,8 @@ validate_route_sync_settings() {
     local valid=true
 
     # Validate startup delay
-    if ! [[ "$startup_delay" =~ ^[0-9]+$ ]] || [ "$startup_delay" -lt 300 ] || [ "$startup_delay" -gt 3600 ]; then
-        print_error "Invalid startup delay: $startup_delay (should be between 300 and 3600)"
+    if ! [[ "$startup_delay" =~ ^[0-9]+$ ]] || [ "$startup_delay" -lt 0 ] || [ "$startup_delay" -gt 3600 ]; then
+        print_error "Invalid startup delay: $startup_delay (should be between 0 and 3600)"
         valid=false
     fi
 
@@ -315,16 +302,19 @@ configure_route_sync_job() {
     echo "│ 3. Auto Concatenate: $(get_route_sync_setting "auto_concat")"
     echo "│ 4. Job Status: $(get_route_sync_setting "enabled")"
     echo "│"
-    echo "│ 5. Apply Changes and Update Job"
+    echo "│ 5. Apply Changes and Update Service"
     echo "│ Q. Back"
     echo "└───────────────────────────────────────────────"
 
     read -p "Enter your choice: " choice
     case $choice in
     1)
-        read -p "Enter startup delay in seconds [300-3600]: " delay
-        if [[ "$delay" =~ ^[0-9]+$ ]] && [ "$delay" -ge 300 ] && [ "$delay" -le 3600 ]; then
+        read -p "Enter startup delay in seconds [0-3600]: " delay
+        if [[ "$delay" =~ ^[0-9]+$ ]] && [ "$delay" -ge 0 ] && [ "$delay" -le 3600 ]; then
             update_route_sync_setting "startup_delay" "$delay"
+            if service_needs_update; then
+                update_service
+            fi
             print_success "Startup delay updated"
         else
             print_error "Invalid delay value"
@@ -334,6 +324,9 @@ configure_route_sync_job() {
         read -p "Enter retention period in days [1-90]: " days
         if [[ "$days" =~ ^[0-9]+$ ]] && [ "$days" -ge 1 ] && [ "$days" -le 90 ]; then
             update_route_sync_setting "retention_days" "$days"
+            if service_needs_update; then
+                update_service
+            fi
             print_success "Retention period updated"
         else
             print_error "Invalid retention period"
@@ -346,29 +339,33 @@ configure_route_sync_job() {
         else
             update_route_sync_setting "auto_concat" "false"
         fi
+        if service_needs_update; then
+            update_service
+        fi
         print_success "Auto concatenate setting updated"
         ;;
     4)
         local current_status=$(get_route_sync_setting "enabled")
         if [ "$current_status" = "true" ]; then
             update_route_sync_setting "enabled" "false"
-            remove_job_block "route_sync"
-            print_success "Route sync job disabled"
+            disable_route_sync_service
+            print_success "Route sync service disabled"
         else
             update_route_sync_setting "enabled" "true"
-            local delay=$(get_route_sync_setting "startup_delay")
-            update_job_in_launch_env "route_sync" "$delay"
-            print_success "Route sync job enabled"
+            enable_route_sync_service
+            print_success "Route sync service enabled"
         fi
         ;;
     5)
         if [ "$(get_route_sync_setting "enabled")" = "true" ]; then
-            local delay=$(get_route_sync_setting "startup_delay")
-            update_job_in_launch_env "route_sync" "$delay"
-            print_success "Route sync job updated"
+            if service_needs_update; then
+                update_service
+                print_success "Service configuration updated"
+            else
+                print_info "Service configuration is up to date"
+            fi
         else
-            remove_job_block "route_sync"
-            print_success "Route sync job removed"
+            print_warning "Route sync is disabled. Enable it first."
         fi
         ;;
     [qQ]) return ;;
@@ -376,8 +373,6 @@ configure_route_sync_job() {
     esac
     pause_for_user
 }
-
-# Add to routes.sh
 
 sync_routes() {
     local network_location_id="$1"

@@ -268,6 +268,21 @@ get_serial_number() {
     echo "$serial_number"
 }
 
+get_is_onroad() {
+    local is_onroad = false
+    local is_onroad_file="/data/params/d/IsOnroad"
+    if [ -f "$is_onroad_file" ]; then
+        is_onroad=$(cat "$is_onroad_file" 2>/dev/null)
+        if [ "$is_onroad" = "1" ]; then
+            return 1
+        else
+            return 0
+        fi
+    else
+        return 0
+    fi
+}
+
 get_wifi_mac_address() {
     # print_info "Getting WiFi MAC address..."
     local wifi_mac_address

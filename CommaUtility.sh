@@ -446,6 +446,12 @@ Route Operations:
   --enable-route-sync               Enable route sync job
   --disable-route-sync              Disable route sync job
 
+Service Operations:
+  --service-status <service>        Show status of specified service
+  --restart-service <service>       Restart specified service
+  --update-route-sync              Update route sync service configuration
+    --network <location_id>        Network location ID for sync
+
 General:
   -h, --help                        Show this help message
 
@@ -604,6 +610,17 @@ parse_arguments() {
             ;;
         --network)
             NETWORK_LOCATION_ID="$2"
+            shift 2
+            ;;
+
+        --service-status)
+            SCRIPT_ACTION="service-status"
+            SERVICE_NAME="$2"
+            shift 2
+            ;;
+        --restart-service)
+            SCRIPT_ACTION="restart-service"
+            SERVICE_NAME="$2"
             shift 2
             ;;
 
@@ -774,6 +791,12 @@ main() {
                 update_route_sync_setting "enabled" "false"
                 remove_job_block "route_sync"
                 print_success "Route sync job disabled"
+                ;;
+            service-status)
+                get_service_status "$SERVICE_NAME"
+                ;;
+            restart-service)
+                restart_service "$SERVICE_NAME"
                 ;;
             *)
                 print_error "Invalid build type. Exiting."
