@@ -436,7 +436,15 @@ System Operations:
 Git Operations:
   --git-pull                        Fetch and pull latest changes
   --git-status                      Show Git repository status
-  --git-branch <branch>            Switch to specified branch
+  --git-branch <branch>             Switch to specified branch
+
+Route Operations:
+  --route-sync                      Execute route sync job
+    --startup-delay <seconds>       Delay before starting sync (300-3600)
+    --retention-days <days>         Days to retain routes after sync (1-90)
+    --auto-concat <true/false>      Auto concatenate routes before sync
+  --enable-route-sync               Enable route sync job
+  --disable-route-sync              Disable route sync job
 
 General:
   -h, --help                        Show this help message
@@ -568,6 +576,37 @@ parse_arguments() {
             NEW_BRANCH="$2"
             shift 2
             ;;
+
+        # Route sync operations
+        --route-sync)
+            SCRIPT_ACTION="route-sync"
+            shift
+            ;;
+        --startup-delay)
+            STARTUP_DELAY="$2"
+            shift 2
+            ;;
+        --retention-days)
+            RETENTION_DAYS="$2"
+            shift 2
+            ;;
+        --auto-concat)
+            AUTO_CONCAT="$2"
+            shift 2
+            ;;
+        --enable-route-sync)
+            SCRIPT_ACTION="enable-route-sync"
+            shift
+            ;;
+        --disable-route-sync)
+            SCRIPT_ACTION="disable-route-sync"
+            shift
+            ;;
+        --network)
+            NETWORK_LOCATION_ID="$2"
+            shift 2
+            ;;
+
         # Help
         -h | --help)
             show_help
@@ -686,6 +725,55 @@ main() {
                     print_error "Error: Branch name required"
                     exit 1
                 fi
+                ;;
+
+            route-sync)
+                # Initialize route sync configuration
+                init_route_sync_config
+
+                # Validate and update settings if provided
+                if [ -n "$STARTUP_DELAY" ]; then
+                    if [[ "$STARTUP_DELAY" =~ ^[0-9]+$ ]] && [ "$STARTUP_DELAY" -ge 300 ] && [ "$STARTUP_DELAY" -le 3600 ]; then
+                        update_route_sync_setting "startup_delay" "$STARTUP_DELAY"
+                    else
+                        print_error "Invalid startup delay value"
+                        exit 1
+                    fi
+                fi
+                if [ -n "$RETENTION_DAYS" ]; then
+                    if [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]] && [ "$RETENTION_DAYS" -ge 1 ] && [ "$RETENTION_DAYS" -le 90 ]; then
+                        update_route_sync_setting "retention_days" "$RETENTION_DAYS"
+                    else
+                        print_error "Invalid retention days value"
+                        exit 1
+                    fi
+                fi
+                if [ -n "$AUTO_CONCAT" ]; then
+                    if [[ "$AUTO_CONCAT" =~ ^(true|false)$ ]]; then
+                        update_route_sync_setting "auto_concat" "$AUTO_CONCAT"
+                    else
+                        print_error "Invalid auto concat value"
+                        exit 1
+                    fi
+                fi
+                # Execute route sync with network location if provided
+                if [ -n "$NETWORK_LOCATION_ID" ]; then
+                    sync_routes "$NETWORK_LOCATION_ID"
+                else
+                    sync_routes
+                fi
+
+                ;;
+            enable-route-sync)
+                update_route_sync_setting "enabled" "true"
+                local delay=$(get_route_sync_setting "startup_delay")
+                update_job_in_launch_env "route_sync" "$delay"
+                print_success "Route sync job enabled"
+                ;;
+            disable-route-sync)
+                update_route_sync_setting "enabled" "false"
+                remove_job_block "route_sync"
+                print_success "Route sync job disabled"
                 ;;
             *)
                 print_error "Invalid build type. Exiting."

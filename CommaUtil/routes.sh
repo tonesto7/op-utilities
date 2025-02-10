@@ -309,6 +309,7 @@ view_routes_menu() {
         echo "│ 2. Remove a single route"
         echo "│ 3. Remove ALL routes"
         echo "│ 4. Manage Network Locations"
+        echo "│ 5. Route Sync Job Management"
         echo "│ Q. Back to Main Menu"
         echo "└────────────────────────────────────────────────────"
 
@@ -318,6 +319,7 @@ view_routes_menu() {
         2) remove_single_route_interactive ;;
         3) remove_all_routes_interactive ;;
         4) manage_network_locations_menu ;;
+        5) route_sync_menu ;;
         [qQ]) return ;;
         *)
             print_error "Invalid choice."
@@ -572,4 +574,112 @@ display_route_stats() {
     echo "│ Routes: $total_routes | Segments: $total_segments"
     echo "│ Total Size: $total_size"
     echo "└────────────────────────────────────────────────────"
+}
+
+###############################################################################
+# Route Sync Job Management
+###############################################################################
+
+route_sync_menu() {
+    # Initialize route sync configuration if it doesn't exist
+    init_route_sync_config
+
+    while true; do
+        clear
+        echo "┌───────────────────────────────────────────────"
+        echo "│            Route Sync Configuration          "
+        echo "├───────────────────────────────────────────────"
+
+        # Display current network location
+        local network_location
+        network_location=$(jq -r '.locations[] | select(.type == "route_backup")' "$NETWORK_CONFIG")
+        if [ -n "$network_location" ]; then
+            local protocol label
+            protocol=$(echo "$network_location" | jq -r .protocol)
+            label=$(echo "$network_location" | jq -r .label)
+            echo -e "│ Network Location: ${GREEN}$label ($protocol)${NC}"
+        else
+            echo -e "│ Network Location: ${RED}Not Configured${NC}"
+        fi
+
+        # Display sync status
+        local sync_enabled=$(get_route_sync_setting "enabled")
+        if [ "$sync_enabled" = "true" ]; then
+            echo -e "│ Sync Status: ${GREEN}Enabled${NC}"
+        else
+            echo -e "│ Sync Status: ${RED}Disabled${NC}"
+        fi
+
+        # Display current settings
+        echo "│"
+        echo "│ Current Settings:"
+        echo "│ • Startup Delay: $(get_route_sync_setting "startup_delay") seconds"
+        echo "│ • Retention Period: $(get_route_sync_setting "retention_days") days"
+        echo "│ • Auto Concatenate: $(get_route_sync_setting "auto_concat")"
+
+        echo "│"
+        echo "│ Available Options:"
+        echo "│ 1. Configure Network Location"
+        echo "│ 2. Configure Sync Settings"
+        echo "│ 3. Enable/Disable Sync Job"
+        echo "│ 4. Test Network Connection"
+        echo "│ 5. Manual Sync (Run Now)"
+        echo "│ 6. View Sync Status"
+        echo "│ 7. View Sync Logs"
+        echo "│ 8. Validate Settings"
+        echo "│ Q. Back"
+        echo "└───────────────────────────────────────────────"
+
+        read -p "Enter your choice: " choice
+        case $choice in
+        1) configure_network_location "route_backup" ;;
+        2) configure_route_sync_job ;;
+        3)
+            if [ "$sync_enabled" = "true" ]; then
+                update_route_sync_setting "enabled" "false"
+                remove_job_block "route_sync"
+                print_success "Route sync job disabled"
+            else
+                if [ -z "$network_location" ]; then
+                    print_error "Please configure network location first"
+                else
+                    # Get the location ID from the network_location
+                    local location_id=$(echo "$network_location" | jq -r .location_id)
+                    local delay=$(get_route_sync_setting "startup_delay")
+
+                    update_route_sync_setting "enabled" "true"
+                    update_job_in_launch_env "route_sync" "$location_id" "$delay"
+                    print_success "Route sync job enabled"
+                fi
+            fi
+            pause_for_user
+            ;;
+        4)
+            if [ -n "$network_location" ]; then
+                verify_network_connectivity "route_backup" "$network_location"
+            else
+                print_error "No network location configured"
+            fi
+            pause_for_user
+            ;;
+        5)
+            if [ -n "$network_location" ]; then
+                sync_routes
+            else
+                print_error "No network location configured"
+            fi
+            pause_for_user
+            ;;
+        6) display_sync_status && pause_for_user ;;
+        7) view_sync_logs && pause_for_user ;;
+        8)
+            if validate_route_sync_settings; then
+                print_success "All settings are valid"
+            fi
+            pause_for_user
+            ;;
+        [qQ]) return ;;
+        *) print_error "Invalid choice" && pause_for_user ;;
+        esac
+    done
 }

@@ -699,3 +699,38 @@ select_network_location() {
         return 1
     fi
 }
+
+###############################################################################
+# Route Sync Job Management
+###############################################################################
+
+add_route_backup_location() {
+    local location_type="route_backup"
+    local type_label="Route Backup"
+
+    # Check if location of this type already exists
+    local existing_location
+    existing_location=$(jq -r --arg type "$location_type" '.locations[] | select(.type == $type)' "$NETWORK_CONFIG")
+
+    if [ -n "$existing_location" ]; then
+        clear
+        print_warning "A $type_label location is already configured."
+        echo "Current configuration:"
+        echo "Server: $(echo "$existing_location" | jq -r .server)"
+        echo "Share: $(echo "$existing_location" | jq -r .share)"
+        echo "Label: $(echo "$existing_location" | jq -r .label)"
+        echo ""
+        read -p "Do you want to replace this configuration? (y/N): " replace_choice
+        if [[ ! "$replace_choice" =~ ^[Yy]$ ]]; then
+            print_info "Configuration cancelled."
+            pause_for_user
+            return 1
+        fi
+        # Remove existing location before adding new one
+        local temp_file="/tmp/network_config.json"
+        jq --arg type "$location_type" '.locations = [.locations[] | select(.type != $type)]' "$NETWORK_CONFIG" >"$temp_file"
+        mv "$temp_file" "$NETWORK_CONFIG"
+    fi
+
+    configure_network_location "$location_type"
+}
