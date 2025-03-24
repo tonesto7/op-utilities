@@ -250,10 +250,10 @@ function update_main_script() {
 
     if wget --timeout=10 -q -O "$tmp_file" "https://raw.githubusercontent.com/tonesto7/op-utilities/$SCRIPT_BRANCH/CommaUtility.sh"; then
         local latest_version
-        latest_version=$(grep "^readonly MAIN_SCRIPT_VERSION=" "$tmp_file" | cut -d'"' -f2)
+        latest_version=$(grep "^readonly SCRIPT_VERSION=" "$tmp_file" | cut -d'"' -f2)
         if [ -n "$latest_version" ]; then
             local cmp
-            cmp=$(compare_versions "$latest_version" "$MAIN_SCRIPT_VERSION")
+            cmp=$(compare_versions "$latest_version" "$SCRIPT_VERSION")
             if [ "$cmp" -eq 1 ]; then
                 # Transient message: update available
                 echo -ne "│ New Script Version ($latest_version) Available. Updating...\r\033[K"
