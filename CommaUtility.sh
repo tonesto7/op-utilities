@@ -11,8 +11,8 @@
 # Global Variables
 ###############################################################################
 readonly SCRIPT_VERSION="3.0.0"
-readonly SCRIPT_MODIFIED="2025-02-11"
-readonly SCRIPT_BRANCH="test"
+readonly SCRIPT_MODIFIED="2025-03-24"
+readonly SCRIPT_BRANCH="main"
 
 # We unify color-coded messages in a single block for consistency:
 readonly RED='\033[0;31m'
