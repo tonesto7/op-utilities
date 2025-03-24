@@ -388,6 +388,15 @@ check_prerequisites() {
     # Make sure important directories exist and are created
     mkdir -p "$CONFIG_DIR" "$CREDENTIALS_DIR" "$TRANSFER_STATE_DIR"
 
+    # Check CONFIG_DIR for route_sync_config.json
+    if [ ! -f "$CONFIG_DIR/route_sync_config.json" ]; then
+        print_info "[-] Route sync config file not found. Creating default config..."
+        # Create a default config file
+        cat <<EOL >"$CONFIG_DIR/route_sync_config.json"
+{}
+EOL
+    fi
+
     return $errors
 }
 
@@ -649,14 +658,11 @@ fi
 ###############################################################################
 # Main Execution
 ###############################################################################
-init_route_sync_config
 
 main() {
-
     while true; do
         if [ -z "$SCRIPT_ACTION" ]; then
             # No arguments or no action set by arguments: show main menu
-            check_prerequisites
             display_main_menu
             handle_main_menu_input
         else
