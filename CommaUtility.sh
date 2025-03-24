@@ -77,6 +77,7 @@ readonly SSH_BACKUP_DIR="$CONFIG_DIR/backups/ssh"
 # Module Directory and Modules
 readonly MODULE_DIR="$CONFIG_DIR/modules"
 readonly MODULES=("backups.sh" "device.sh" "issues.sh" "jobs.sh" "network.sh" "repo.sh" "routes.sh" "service.sh" "ssh.sh" "storage.sh" "transfers.sh" "utils.sh")
+SKIP_UPDATE=false
 
 ###############################################################################
 # Main Menu
@@ -390,11 +391,7 @@ check_prerequisites() {
 
     # Check CONFIG_DIR for route_sync_config.json
     if [ ! -f "$CONFIG_DIR/route_sync_config.json" ]; then
-        print_info "[-] Route sync config file not found. Creating default config..."
-        # Create a default config file
-        cat <<EOL >"$CONFIG_DIR/route_sync_config.json"
-{}
-EOL
+        init_route_sync_config
     fi
 
     return $errors
@@ -438,6 +435,7 @@ Clone Operations:
 
 System Operations:
   --update                          Update this script to latest version
+  --skip-update                     Skip update check
   --reboot                          Reboot the device
   --shutdown                        Shutdown the device
   --view-logs                       View system logs
@@ -549,6 +547,10 @@ parse_arguments() {
         # System operations
         --update)
             SCRIPT_ACTION="update"
+            shift
+            ;;
+        --skip-update)
+            SKIP_UPDATE=true
             shift
             ;;
         --reboot)
@@ -825,8 +827,13 @@ main() {
 run_script() {
 
     echo -e "┌──────────────────────────────────────────"
-    # Update the main script to the latest version
-    update_main_script
+    # Check if update should be skipped
+    if [ "$SKIP_UPDATE" = "true" ]; then
+        echo -e "│ Update check skipped by user."
+    else
+        # Update the main script to the latest version
+        update_main_script
+    fi
     echo -e "├──────────────────────────────────────────"
     # Load all modules and check for updates
     load_modules
