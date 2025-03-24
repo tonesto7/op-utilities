@@ -14,8 +14,8 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly SCRIPT_VERSION="2.4.2"
-readonly SCRIPT_MODIFIED="2025-01-22"
+readonly SCRIPT_VERSION="2.4.3"
+readonly SCRIPT_MODIFIED="2025-03-24"
 
 # We unify color-coded messages in a single block for consistency:
 readonly RED='\033[0;31m'
@@ -1773,6 +1773,7 @@ Git Operations:
 
 General:
   -h, --help                        Show this help message
+  --no-update                       Skip checking for script updates
 
 Examples:
   # SSH operations
@@ -2080,7 +2081,7 @@ process_submodules() {
             # Remove any .git folder inside the copied submodule so that files are tracked as normal files.
             rm -rf "$tmp_dir/.git"
 
-            # Remove the submodule from git’s index.
+            # Remove the submodule from git's index.
             git rm -rf --cached "$sub" 2>/dev/null
 
             # Remove the original submodule directory.
@@ -3043,6 +3044,10 @@ parse_arguments() {
             show_help
             exit 0
             ;;
+        --no-update)
+            SKIP_UPDATE=true
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
             show_help
@@ -3058,7 +3063,7 @@ if [ $# -gt 0 ]; then
 fi
 
 main() {
-    if [ -z "$SCRIPT_ACTION" ]; then
+    if [ -z "$SCRIPT_ACTION" ] && [ "$SKIP_UPDATE" != "true" ]; then
         check_for_updates
     fi
 
@@ -3108,7 +3113,7 @@ main() {
                     read -p "Compile now? (y/N): " compile_confirm
                     if [[ "$compile_confirm" =~ ^[Yy]$ ]]; then
                         print_info "[-] Running scons..."
-                        cd /data/openpilot
+                        cd "/data/openpilot" || exit 1
                         scons -j"$(nproc)" || {
                             print_error "[-] SCons failed."
                             exit 1
