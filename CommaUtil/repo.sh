@@ -8,8 +8,9 @@
 #
 # This script manages device Openpilot repository operations (clone, branch, etc.)
 ###############################################################################
-readonly REPO_SCRIPT_VERSION="3.0.0"
-readonly REPO_SCRIPT_MODIFIED="2025-02-10"
+readonly REPO_SCRIPT_VERSION="3.0.1"
+readonly REPO_SCRIPT_MODIFIED="2025-03-25"
+readonly REPO_CLONE_DEPTH="30"
 
 # Variables from build_bluepilot script
 SCRIPT_ACTION=""
@@ -38,7 +39,7 @@ git_clone_and_init() {
         return 1
     fi
 
-    local clone_cmd="git clone --depth 1 -b '$branch' '$repo_url' '$dest_dir'"
+    local clone_cmd="git clone --depth $REPO_CLONE_DEPTH -b '$branch' '$repo_url' '$dest_dir'"
     if ! execute_with_network_retry "$clone_cmd" "Failed to clone repository"; then
         return 1
     fi
@@ -501,7 +502,7 @@ clone_openpilot_repo() {
     rm -rf ./openpilot
 
     if [ "$shallow" = true ]; then
-        if ! git_operation_with_timeout "git clone -b $branch_name --depth 1 git@github.com:$github_repo openpilot" 300; then
+        if ! git_operation_with_timeout "git clone -b $branch_name --depth $REPO_CLONE_DEPTH git@github.com:$github_repo openpilot" 300; then
             print_error "Failed to clone repository"
             return 1
         fi
@@ -858,7 +859,7 @@ clone_repo_bp() {
 
     cd "/data" || exit 1
     rm -rf openpilot
-    git clone --depth 1 "${repo_url}" -b "${branch}" openpilot || exit 1
+    git clone --depth $REPO_CLONE_DEPTH "${repo_url}" -b "${branch}" openpilot || exit 1
     cd openpilot || exit 1
 
     # Check if there are any submodules and if so, update them
