@@ -8,8 +8,8 @@
 #
 # This script manages device Openpilot repository operations (clone, branch, etc.)
 ###############################################################################
-readonly REPO_SCRIPT_VERSION="3.0.1"
-readonly REPO_SCRIPT_MODIFIED="2025-03-25"
+readonly REPO_SCRIPT_VERSION="3.0.2"
+readonly REPO_SCRIPT_MODIFIED="2025-04-06"
 readonly REPO_CLONE_DEPTH="30"
 
 # Variables from build_bluepilot script
