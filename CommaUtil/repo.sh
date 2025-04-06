@@ -676,7 +676,7 @@ cleanup_files() {
     rm -rf teleoprtc_repo teleoprtc release
     rm -f selfdrive/modeld/models/supercombo.onnx
     rm -rf selfdrive/ui/replay/
-    rm -rf tools/cabana tools/camerastream tools/car_porting tools/joystick tools/latencylogger tools/plotjuggler tools/profiling
+    rm -rf tools/cabana tools/camerastream tools/car_porting tools/latencylogger tools/plotjuggler tools/profiling
     rm -rf tools/replay tools/rerun tools/scripts tools/serial tools/sim tools/tuning tools/webcam
     rm -f tools/*.py tools/*.sh tools/*.md
     rm -f conftest.py SECURITY.md uv.lock
