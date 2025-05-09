@@ -10,8 +10,8 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly SCRIPT_VERSION="3.0.2"
-readonly SCRIPT_MODIFIED="2025-03-25"
+readonly SCRIPT_VERSION="3.1.0"
+readonly SCRIPT_MODIFIED="2025-05-08"
 readonly SCRIPT_BRANCH="main"
 
 # We unify color-coded messages in a single block for consistency:
@@ -424,6 +424,7 @@ Build Operations:
     --repo <repository>             Select repository (bluepilotdev, sp-dev-c3, sunnypilot, or commaai)
     --clone-branch <branch>         Branch to clone
     --build-branch <branch>         Branch name for build
+    --push-repo <repository>        Repository to push build to (optional, defaults to clone repo)
 
 Clone Operations:
   --clone-public-bp                 Clone BluePilot staging branch
@@ -517,6 +518,10 @@ parse_arguments() {
             ;;
         --repo)
             REPO="$2"
+            shift 2
+            ;;
+        --push-repo)
+            PUSH_REPO="$2"
             shift 2
             ;;
         --clone-branch)
@@ -733,8 +738,11 @@ main() {
                     exit 1
                     ;;
                 esac
+                # Determine push repo - either specified or same as clone repo
+                local PUSH_REPO_URL="${PUSH_REPO:-$GIT_REPO_URL}"
+
                 local COMMIT_DESC_HEADER="Custom Build"
-                build_repo_branch "$CLONE_BRANCH" "$BUILD_BRANCH" "$COMMIT_DESC_HEADER" "$GIT_REPO_ORIGIN"
+                build_repo_branch "$CLONE_BRANCH" "$BUILD_BRANCH" "$COMMIT_DESC_HEADER" "$GIT_REPO_URL" "$PUSH_REPO_URL"
                 print_success "[-] Action completed successfully"
                 ;;
             update) update_script ;;

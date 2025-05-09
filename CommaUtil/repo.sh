@@ -8,8 +8,8 @@
 #
 # This script manages device Openpilot repository operations (clone, branch, etc.)
 ###############################################################################
-readonly REPO_SCRIPT_VERSION="3.0.2"
-readonly REPO_SCRIPT_MODIFIED="2025-04-06"
+readonly REPO_SCRIPT_VERSION="3.1.0"
+readonly REPO_SCRIPT_MODIFIED="2025-05-08"
 readonly REPO_CLONE_DEPTH="30"
 
 # Variables from build_bluepilot script
@@ -902,11 +902,12 @@ reboot_device_bp() {
 choose_repository_and_branch() {
     clear
     local action="$1"
+    local select_push_repo="${2:-false}" # New parameter to determine if we should select a push repo
 
-    # First, select repository.
+    # First, select source repository
     while true; do
         echo ""
-        echo "Select Repository:"
+        echo "Select Source Repository:"
         echo "1) BluePilotDev/bluepilot"
         echo "2) ford-op/sp-dev-c3"
         echo "3) sunnypilot/sunnypilot"
@@ -943,21 +944,51 @@ choose_repository_and_branch() {
         esac
     done
 
+    # If cross-repo building is enabled, select destination repository
+    PUSH_REPO_SELECTED=""
+    if [ "$select_push_repo" = "true" ]; then
+        clear
+        echo "Select Destination Repository:"
+        echo "1) BluePilotDev/bluepilot"
+        echo "2) ford-op/sp-dev-c3"
+        echo "3) Use same as source"
+        echo "c) Cancel"
+        read -p "Enter your choice: " push_repo_choice
+        case $push_repo_choice in
+        1)
+            PUSH_REPO_SELECTED="$GIT_BP_PUBLIC_REPO"
+            ;;
+        2)
+            PUSH_REPO_SELECTED="$GIT_BP_PRIVATE_REPO"
+            ;;
+        3)
+            PUSH_REPO_SELECTED="$GIT_REPO_ORIGIN"
+            ;;
+        [cC])
+            return 1
+            ;;
+        *)
+            print_error "Invalid choice. Please try again."
+            PUSH_REPO_SELECTED="$GIT_REPO_ORIGIN" # Default to same as source
+            ;;
+        esac
+    else
+        # If not doing cross-repo, use the same repo
+        PUSH_REPO_SELECTED="$GIT_REPO_ORIGIN"
+    fi
+
     clear
-    # Use reusable branch selection to choose the branch.
+    # Use reusable branch selection to choose the branch
     if ! select_branch_menu "$GIT_REPO_ORIGIN"; then
         return 1
     fi
 
-    # Set the chosen branch to both CLONE_BRANCH and (optionally) BUILD_BRANCH.
+    # Set the chosen branch to both CLONE_BRANCH and BUILD_BRANCH
     CLONE_BRANCH="$SELECTED_BRANCH"
     BUILD_BRANCH="${CLONE_BRANCH}-build"
 
-    # print_info "Selected branch: $CLONE_BRANCH"
-    # print_info "Build branch would be: $BUILD_BRANCH"
     return 0
 }
-
 clone_custom_repo() {
     if ! choose_repository_and_branch "clone"; then
         return
@@ -993,9 +1024,33 @@ clone_custom_repo() {
 }
 
 custom_build_process() {
-    if ! choose_repository_and_branch "build"; then
+    clear
+    echo "Build Options:"
+    echo "1) Standard build (same source and destination)"
+    echo "2) Cross-repository build"
+    echo "c) Cancel"
+
+    read -p "Enter your choice: " build_type
+    case $build_type in
+    1)
+        if ! choose_repository_and_branch "build" "false"; then
+            return
+        fi
+        ;;
+    2)
+        if ! choose_repository_and_branch "build" "true"; then
+            return
+        fi
+        ;;
+    [cC])
         return
-    fi
+        ;;
+    *)
+        print_error "Invalid choice."
+        return
+        ;;
+    esac
+
     if [ "$REPO" = "bluepilotdev" ]; then
         GIT_REPO_ORIGIN="$GIT_BP_PUBLIC_REPO"
     elif [ "$REPO" = "sp-dev-c3" ]; then
@@ -1010,9 +1065,14 @@ custom_build_process() {
     fi
 
     print_info "Building branch: $CLONE_BRANCH"
-    print_info "Build branch would be: $BUILD_BRANCH"
+    print_info "Source repository: $GIT_REPO_ORIGIN"
+    print_info "Destination repository: $PUSH_REPO_SELECTED"
+    print_info "Build branch: $BUILD_BRANCH"
+
     local COMMIT_DESC_HEADER="Custom Build"
-    build_repo_branch "$CLONE_BRANCH" "$BUILD_BRANCH" "$COMMIT_DESC_HEADER" "$GIT_REPO_ORIGIN"
+
+    # Pass the PUSH_REPO_SELECTED as the 5th parameter to build_repo_branch
+    build_repo_branch "$CLONE_BRANCH" "$BUILD_BRANCH" "$COMMIT_DESC_HEADER" "$GIT_REPO_ORIGIN" "$PUSH_REPO_SELECTED"
     print_success "[-] Action completed successfully"
 }
 
