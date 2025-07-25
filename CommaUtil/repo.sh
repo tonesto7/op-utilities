@@ -8,8 +8,8 @@
 #
 # This script manages device Openpilot repository operations (clone, branch, etc.)
 ###############################################################################
-readonly REPO_SCRIPT_VERSION="3.1.0"
-readonly REPO_SCRIPT_MODIFIED="2025-05-08"
+readonly REPO_SCRIPT_VERSION="3.1.1"
+readonly REPO_SCRIPT_MODIFIED="2025-07-25"
 readonly REPO_CLONE_DEPTH="30"
 
 # Variables from build_bluepilot script
@@ -983,12 +983,53 @@ choose_repository_and_branch() {
         return 1
     fi
 
-    # Set the chosen branch to both CLONE_BRANCH and BUILD_BRANCH
+    # Set the chosen branch to CLONE_BRANCH
     CLONE_BRANCH="$SELECTED_BRANCH"
-    BUILD_BRANCH="${CLONE_BRANCH}-build"
+
+    # NEW: Allow user to specify custom push branch name
+    if [ "$action" = "build" ]; then
+        clear
+        echo "Source branch: $CLONE_BRANCH"
+        echo ""
+        echo "Push Branch Options:"
+        echo "1) Use default: ${CLONE_BRANCH}-build"
+        echo "2) Specify custom branch name"
+        echo "c) Cancel"
+        
+        read -p "Enter your choice: " branch_name_choice
+        case $branch_name_choice in
+        1)
+            BUILD_BRANCH="${CLONE_BRANCH}-build"
+            ;;
+        2)
+            while true; do
+                read -p "Enter custom push branch name: " custom_branch_name
+                if [ -n "$custom_branch_name" ] && [[ "$custom_branch_name" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+                    BUILD_BRANCH="$custom_branch_name"
+                    break
+                elif [ -z "$custom_branch_name" ]; then
+                    print_error "Branch name cannot be empty."
+                else
+                    print_error "Invalid branch name. Use only letters, numbers, dots, underscores, and hyphens."
+                fi
+            done
+            ;;
+        [cC])
+            return 1
+            ;;
+        *)
+            print_error "Invalid choice. Using default."
+            BUILD_BRANCH="${CLONE_BRANCH}-build"
+            ;;
+        esac
+    else
+        # For clone operations, BUILD_BRANCH is not needed
+        BUILD_BRANCH="${CLONE_BRANCH}-build"
+    fi
 
     return 0
 }
+
 clone_custom_repo() {
     if ! choose_repository_and_branch "clone"; then
         return
@@ -1067,7 +1108,7 @@ custom_build_process() {
     print_info "Building branch: $CLONE_BRANCH"
     print_info "Source repository: $GIT_REPO_ORIGIN"
     print_info "Destination repository: $PUSH_REPO_SELECTED"
-    print_info "Build branch: $BUILD_BRANCH"
+    print_info "Push branch name: $BUILD_BRANCH"
 
     local COMMIT_DESC_HEADER="Custom Build"
 
