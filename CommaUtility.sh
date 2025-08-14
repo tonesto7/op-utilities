@@ -10,8 +10,8 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly SCRIPT_VERSION="3.1.0"
-readonly SCRIPT_MODIFIED="2025-05-08"
+readonly SCRIPT_VERSION="3.1.1"
+readonly SCRIPT_MODIFIED="2025-08-14"
 readonly SCRIPT_BRANCH="main"
 
 # We unify color-coded messages in a single block for consistency:
@@ -834,6 +834,12 @@ main() {
 ###############################################################################
 run_script() {
 
+    # nproc <8 && If /data/openpilot/scripts/disable-powersave.py exists run it to disable powersave
+    if [ "$(nproc)" -lt 8 ] && [ -f "/data/openpilot/scripts/disable-powersave.py" ]; then
+        print_info "Disabling powersave..."
+        python3 /data/openpilot/scripts/disable-powersave.py
+    fi
+    
     echo -e "┌──────────────────────────────────────────"
     # Check if update should be skipped
     if [ "$SKIP_UPDATE" = "true" ]; then
