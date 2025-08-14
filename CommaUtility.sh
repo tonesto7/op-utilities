@@ -10,7 +10,7 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly SCRIPT_VERSION="3.1.1"
+readonly SCRIPT_VERSION="3.1.2"
 readonly SCRIPT_MODIFIED="2025-08-14"
 readonly SCRIPT_BRANCH="main"
 
@@ -155,8 +155,8 @@ display_main_menu() {
     echo "│ 4. View Recent Error"
     echo "│ 5. System Statistics"
     echo "│ 6. Device Controls"
-    echo "│ 7. Modify Boot Icon/Logo"
-    echo "│ 8. Route & Transfer Management"
+    # echo "│ 7. Modify Boot Icon/Logo"
+    echo "│ 7. Route & Transfer Management"
 
     # Dynamic fix options
     local fix_number=9 # Start from 6 because we already have 5 options
