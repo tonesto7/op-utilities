@@ -7,8 +7,8 @@
 #
 # This script manages device status, controls, and statistics.
 ###############################################################################
-readonly DEVICE_SCRIPT_VERSION="3.0.0"
-readonly DEVICE_SCRIPT_MODIFIED="2025-02-10"
+readonly DEVICE_SCRIPT_VERSION="3.0.1"
+readonly DEVICE_SCRIPT_MODIFIED="2025-08-14"
 
 ###############################################################################
 # Boot & Logo Update Functions
@@ -162,6 +162,7 @@ display_os_info_short() {
     echo "│ ├─ Serial Number: $(get_serial_number)"
     echo "│ ├─ WiFi MAC Address: $(get_wifi_mac_address)"
     echo "│ ├─ WiFi SSID: $(get_wifi_ssid)"
+    echo "│ ├─ CPU Powersave: $(get_cpu_powersave_status)"
 
     if [ -f "$BOOT_IMG_BKP" ] && [ -f "$LOGO_IMG_BKP" ]; then
         echo -e "│ └─ Custom Boot/Logo: ${GREEN}Yes${NC}"
@@ -300,6 +301,28 @@ get_wifi_ssid() {
         fi
     done)
     echo "$wifi_ssid"
+}
+
+get_cpu_powersave_status() {
+    # Check if CPU powersave is enabled by examining if all 8 cores are active
+    # Powersave mode is when only 4 cores are active instead of all 8
+    local total_cores
+    local online_cores
+    
+    # Get total number of cores available
+    total_cores=$(nproc --all 2>/dev/null || echo "0")
+    
+    # Get number of online cores
+    online_cores=$(nproc 2>/dev/null || echo "0")
+    
+    # Powersave is enabled when only 4 cores are active (instead of all 8)
+    if [ "$online_cores" -eq 4 ] && [ "$total_cores" -eq 8 ]; then
+        echo "Enabled (4/8 cores active)"
+    elif [ "$online_cores" -eq 8 ] && [ "$total_cores" -eq 8 ]; then
+        echo "Disabled (All 8 cores active)"
+    else
+        echo "Unknown ($online_cores/$total_cores cores active)"
+    fi
 }
 
 manage_wifi_networks() {
