@@ -2,13 +2,13 @@
 ###############################################################################
 # issues.sh - Device Issue Detection and Resolution for CommaUtility
 #
-# Version: ISSUES_SCRIPT_VERSION="3.0.3"
-# Last Modified: 2025-02-09
+# Version: ISSUES_SCRIPT_VERSION="3.0.1"
+# Last Modified: 2025-10-23
 #
 # This script detects and resolves issues on the device.
 ###############################################################################
-readonly ISSUES_SCRIPT_VERSION="3.0.0"
-readonly ISSUES_SCRIPT_MODIFIED="2025-02-10"
+readonly ISSUES_SCRIPT_VERSION="3.0.1"
+readonly ISSUES_SCRIPT_MODIFIED="2025-10-23"
 
 # Array-based detection data
 declare -A ISSUE_FIXES
@@ -194,6 +194,17 @@ detect_issues() {
             ISSUE_DESCRIPTIONS[$issues_found]="Route sync service needs configuration update"
             ISSUE_PRIORITIES[$issues_found]=3
         fi
+    fi
+
+    ###############################################################################
+    # Data Directory Permission Checks
+    ###############################################################################
+    # Check if /data and /data/openpilot have correct permissions (755) and ownership (comma:comma)
+    if ! check_data_permissions; then
+        issues_found=$((issues_found + 1))
+        ISSUE_FIXES[$issues_found]="repair_data_permissions"
+        ISSUE_DESCRIPTIONS[$issues_found]="Incorrect permissions on /data or /data/openpilot directories"
+        ISSUE_PRIORITIES[$issues_found]=1
     fi
 
 }

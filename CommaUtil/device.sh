@@ -2,13 +2,13 @@
 ###############################################################################
 # device.sh - Device Management Functions for CommaUtility
 #
-# Version: DEVICE_SCRIPT_VERSION="3.0.3"
-# Last Modified: 2025-02-09
+# Version: DEVICE_SCRIPT_VERSION="3.0.4"
+# Last Modified: 2025-10-23
 #
 # This script manages device status, controls, and statistics.
 ###############################################################################
-readonly DEVICE_SCRIPT_VERSION="3.0.1"
-readonly DEVICE_SCRIPT_MODIFIED="2025-08-14"
+readonly DEVICE_SCRIPT_VERSION="3.0.4"
+readonly DEVICE_SCRIPT_MODIFIED="2025-10-23"
 
 ###############################################################################
 # Boot & Logo Update Functions
@@ -308,13 +308,13 @@ get_cpu_powersave_status() {
     # Powersave mode is when only 4 cores are active instead of all 8
     local total_cores
     local online_cores
-    
+
     # Get total number of cores available
     total_cores=$(nproc --all 2>/dev/null || echo "0")
-    
+
     # Get number of online cores
     online_cores=$(nproc 2>/dev/null || echo "0")
-    
+
     # Powersave is enabled when only 4 cores are active (instead of all 8)
     if [ "$online_cores" -eq 4 ] && [ "$total_cores" -eq 8 ]; then
         echo "Enabled (4/8 cores active)"
@@ -493,6 +493,167 @@ device_controls_menu() {
         *) print_error "Invalid choice." ;;
         esac
     done
+}
+
+###############################################################################
+# Permission Check and Repair Functions
+###############################################################################
+
+check_data_permissions() {
+    # Check permissions on /data and /data/openpilot directories
+    # Returns: 0 if permissions are correct, 1 if they need fixing
+    local issues_found=0
+    local data_perms
+    local data_owner
+    local data_openpilot_perms
+    local data_openpilot_owner
+
+    # Check /data directory
+    if [ -d "/data" ]; then
+        data_perms=$(stat -c '%a' /data 2>/dev/null)
+        data_owner=$(stat -c '%U:%G' /data 2>/dev/null)
+
+        if [ "$data_perms" != "755" ] || [ "$data_owner" != "comma:comma" ]; then
+            issues_found=$((issues_found + 1))
+        fi
+    else
+        print_error "/data directory does not exist"
+        return 1
+    fi
+
+    # Check /data/openpilot directory
+    if [ -d "/data/openpilot" ]; then
+        data_openpilot_perms=$(stat -c '%a' /data/openpilot 2>/dev/null)
+        data_openpilot_owner=$(stat -c '%U:%G' /data/openpilot 2>/dev/null)
+
+        if [ "$data_openpilot_perms" != "755" ] || [ "$data_openpilot_owner" != "comma:comma" ]; then
+            issues_found=$((issues_found + 1))
+        fi
+    fi
+
+    return $issues_found
+}
+
+display_data_permissions() {
+    # Display detailed permission information for /data and /data/openpilot
+    clear
+    echo "┌────────────────────────────────────────────────────"
+    echo "│         /data Directory Permissions Status"
+    echo "├────────────────────────────────────────────────────"
+    echo "│"
+
+    if [ -d "/data" ]; then
+        local data_perms=$(stat -c '%a' /data 2>/dev/null)
+        local data_owner=$(stat -c '%U:%G' /data 2>/dev/null)
+        local data_perms_full=$(ls -ld /data | awk '{print $1}')
+
+        echo "│ /data:"
+        echo "│ ├─ Permissions: $data_perms_full ($data_perms)"
+        echo "│ ├─ Owner: $data_owner"
+
+        if [ "$data_perms" = "755" ] && [ "$data_owner" = "comma:comma" ]; then
+            echo -e "│ └─ Status: ${GREEN}✓ Correct${NC}"
+        else
+            echo -e "│ └─ Status: ${RED}✗ Incorrect${NC}"
+            echo "│    Expected: drwxr-xr-x (755) comma:comma"
+        fi
+    else
+        echo -e "│ /data: ${RED}Not found${NC}"
+    fi
+
+    echo "│"
+
+    if [ -d "/data/openpilot" ]; then
+        local data_op_perms=$(stat -c '%a' /data/openpilot 2>/dev/null)
+        local data_op_owner=$(stat -c '%U:%G' /data/openpilot 2>/dev/null)
+        local data_op_perms_full=$(ls -ld /data/openpilot | awk '{print $1}')
+
+        echo "│ /data/openpilot:"
+        echo "│ ├─ Permissions: $data_op_perms_full ($data_op_perms)"
+        echo "│ ├─ Owner: $data_op_owner"
+
+        if [ "$data_op_perms" = "755" ] && [ "$data_op_owner" = "comma:comma" ]; then
+            echo -e "│ └─ Status: ${GREEN}✓ Correct${NC}"
+        else
+            echo -e "│ └─ Status: ${RED}✗ Incorrect${NC}"
+            echo "│    Expected: drwxr-xr-x (755) comma:comma"
+        fi
+    else
+        echo -e "│ /data/openpilot: ${RED}Not found${NC}"
+    fi
+
+    echo "│"
+    echo "└────────────────────────────────────────────────────"
+}
+
+repair_data_permissions() {
+    # Repair permissions on /data and /data/openpilot directories
+    clear
+    echo "┌────────────────────────────────────────────────────"
+    echo "│         Repairing /data Permissions"
+    echo "├────────────────────────────────────────────────────"
+    echo "│"
+
+    display_data_permissions
+
+    echo "│"
+    read -p "│ Do you want to repair permissions? (y/N): " confirm
+
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        print_info "│ Permission repair cancelled."
+        pause_for_user
+        return 0
+    fi
+
+    echo "│"
+    print_info "│ Starting permission repair..."
+    echo "│"
+
+    local errors=0
+
+    # Fix /data ownership and permissions
+    if [ -d "/data" ]; then
+        print_info "│ Fixing /data ownership..."
+        if sudo chown -R comma:comma /data; then
+            print_success "│ ✓ /data ownership fixed"
+        else
+            print_error "│ ✗ Failed to fix /data ownership"
+            errors=$((errors + 1))
+        fi
+
+        print_info "│ Fixing /data permissions..."
+        if sudo chmod 755 /data; then
+            print_success "│ ✓ /data permissions fixed"
+        else
+            print_error "│ ✗ Failed to fix /data permissions"
+            errors=$((errors + 1))
+        fi
+    fi
+
+    # Fix /data/openpilot ownership and permissions
+    if [ -d "/data/openpilot" ]; then
+        print_info "│ Fixing /data/openpilot permissions..."
+        if sudo chmod 755 /data/openpilot; then
+            print_success "│ ✓ /data/openpilot permissions fixed"
+        else
+            print_error "│ ✗ Failed to fix /data/openpilot permissions"
+            errors=$((errors + 1))
+        fi
+    fi
+
+    echo "│"
+
+    if [ $errors -eq 0 ]; then
+        print_success "│ Permission repair completed successfully!"
+        echo "│"
+        display_data_permissions
+    else
+        print_error "│ Permission repair completed with $errors error(s)"
+    fi
+
+    echo "│"
+    pause_for_user
+    return $errors
 }
 
 ###############################################################################
