@@ -7,8 +7,8 @@
 #
 # This script manages device status, controls, and statistics.
 ###############################################################################
-readonly DEVICE_SCRIPT_VERSION="3.0.4"
-readonly DEVICE_SCRIPT_MODIFIED="2025-10-23"
+readonly DEVICE_SCRIPT_VERSION="3.0.5"
+readonly DEVICE_SCRIPT_MODIFIED="2025-10-29"
 
 ###############################################################################
 # Boot & Logo Update Functions
@@ -529,6 +529,9 @@ check_data_permissions() {
         if [ "$data_openpilot_perms" != "755" ] || [ "$data_openpilot_owner" != "comma:comma" ]; then
             issues_found=$((issues_found + 1))
         fi
+    else
+        # /data/openpilot directory doesn't exist - this is an issue
+        issues_found=$((issues_found + 1))
     fi
 
     return $issues_found
@@ -632,6 +635,14 @@ repair_data_permissions() {
 
     # Fix /data/openpilot ownership and permissions
     if [ -d "/data/openpilot" ]; then
+        print_info "│ Fixing /data/openpilot ownership..."
+        if sudo chown -R comma:comma /data/openpilot; then
+            print_success "│ ✓ /data/openpilot ownership fixed"
+        else
+            print_error "│ ✗ Failed to fix /data/openpilot ownership"
+            errors=$((errors + 1))
+        fi
+        
         print_info "│ Fixing /data/openpilot permissions..."
         if sudo chmod 755 /data/openpilot; then
             print_success "│ ✓ /data/openpilot permissions fixed"
@@ -639,6 +650,9 @@ repair_data_permissions() {
             print_error "│ ✗ Failed to fix /data/openpilot permissions"
             errors=$((errors + 1))
         fi
+    else
+        print_warning "│ /data/openpilot directory does not exist"
+        print_info "│ You need to clone openpilot repository to create this directory"
     fi
 
     echo "│"

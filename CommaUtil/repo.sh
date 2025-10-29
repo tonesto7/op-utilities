@@ -8,8 +8,8 @@
 #
 # This script manages device Openpilot repository operations (clone, branch, etc.)
 ###############################################################################
-readonly REPO_SCRIPT_VERSION="3.1.1"
-readonly REPO_SCRIPT_MODIFIED="2025-07-25"
+readonly REPO_SCRIPT_VERSION="3.1.2"
+readonly REPO_SCRIPT_MODIFIED="2025-10-29"
 readonly REPO_CLONE_DEPTH="30"
 
 # Variables from build_bluepilot script
@@ -219,6 +219,10 @@ fetch_pull_latest_changes() {
 
             print_success "Successfully updated repository"
         )
+        
+        # Fix permissions after pull operation
+        sudo chown -R comma:comma /data/openpilot 2>/dev/null || true
+        sudo chmod 755 /data/openpilot 2>/dev/null || true
     else
         print_warning "No openpilot directory found."
     fi
@@ -361,6 +365,10 @@ change_branch() {
             return 1
         fi
     fi
+    
+    # Fix permissions after checkout/submodule operations
+    sudo chown -R comma:comma /data/openpilot 2>/dev/null || true
+    sudo chmod 755 /data/openpilot 2>/dev/null || true
 
     print_success "Successfully switched to branch: $SELECTED_BRANCH"
     print_success "All submodules have been updated"
@@ -431,6 +439,11 @@ reset_git_changes() {
     [qQ]) return 0 ;;
     *) print_error "Invalid choice." ;;
     esac
+    
+    # Fix permissions after reset/clean operations
+    sudo chown -R comma:comma /data/openpilot 2>/dev/null || true
+    sudo chmod 755 /data/openpilot 2>/dev/null || true
+    
     pause_for_user
 }
 
@@ -483,6 +496,11 @@ manage_submodules() {
     [qQ]) return 0 ;;
     *) print_error "Invalid choice." ;;
     esac
+    
+    # Fix permissions after submodule operations
+    sudo chown -R comma:comma /data/openpilot 2>/dev/null || true
+    sudo chmod 755 /data/openpilot 2>/dev/null || true
+    
     pause_for_user
 }
 
@@ -784,6 +802,12 @@ build_repo_branch() {
         return 1
     fi
 
+    # Fix permissions on newly cloned directory (only on device, not macOS)
+    if [ "$BUILD_DIR" = "/data/openpilot" ]; then
+        sudo chown -R comma:comma "$BUILD_DIR" 2>/dev/null || true
+        sudo chmod 755 "$BUILD_DIR" 2>/dev/null || true
+    fi
+
     cd "$BUILD_DIR" || exit 1
 
     # Update submodules if any.
@@ -860,6 +884,11 @@ clone_repo_bp() {
     cd "/data" || exit 1
     rm -rf openpilot
     git clone --depth $REPO_CLONE_DEPTH "${repo_url}" -b "${branch}" openpilot || exit 1
+    
+    # Fix permissions on newly cloned directory
+    sudo chown -R comma:comma /data/openpilot || exit 1
+    sudo chmod 755 /data/openpilot || exit 1
+    
     cd openpilot || exit 1
 
     # Check if there are any submodules and if so, update them

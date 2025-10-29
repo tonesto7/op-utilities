@@ -10,8 +10,8 @@
 ###############################################################################
 # Global Variables
 ###############################################################################
-readonly SCRIPT_VERSION="3.1.2"
-readonly SCRIPT_MODIFIED="2025-08-14"
+readonly SCRIPT_VERSION="3.1.3"
+readonly SCRIPT_MODIFIED="2025-10-29"
 readonly SCRIPT_BRANCH="main"
 
 # We unify color-coded messages in a single block for consistency:
